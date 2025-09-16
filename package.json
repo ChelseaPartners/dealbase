@@ -1,0 +1,22 @@
+{
+  "name": "dealbase",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Commercial Real Estate Valuation Engine",
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter @dealbase/web dev\" \"pnpm --filter @dealbase/api dev\"",
+    "build": "pnpm --filter @dealbase/shared build && pnpm --filter @dealbase/web build",
+    "test": "pnpm --filter @dealbase/web test && pnpm --filter @dealbase/api test",
+    "lint": "pnpm --filter @dealbase/web lint && pnpm --filter @dealbase/api lint",
+    "typecheck": "pnpm --filter @dealbase/shared typecheck && pnpm --filter @dealbase/web typecheck",
+    "clean": "pnpm -r exec rm -rf node_modules dist .next"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "prettier": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}

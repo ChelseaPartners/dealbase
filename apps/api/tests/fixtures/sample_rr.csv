@@ -1,0 +1,9 @@
+unit_number,unit_type,square_feet,bedrooms,bathrooms,rent,market_rent,tenant_name,lease_start,lease_end
+101,1BR,750,1,1,2100,2200,John Smith,2023-01-01,2024-12-31
+102,1BR,750,1,1,2050,2200,Jane Doe,2023-03-15,2024-03-14
+201,2BR,950,2,1,2800,2900,Bob Johnson,2022-11-01,2024-10-31
+202,2BR,950,2,1,2750,2900,Alice Brown,2023-02-01,2025-01-31
+301,2BR,950,2,1,2850,2900,Charlie Wilson,2023-01-15,2024-01-14
+302,1BR,750,1,1,2150,2200,Diana Lee,2023-04-01,2024-03-31
+401,2BR,950,2,1,2900,2900,Frank Miller,2022-09-01,2024-08-31
+402,1BR,750,1,1,2000,2200,Grace Taylor,2023-05-01,2024-04-30
