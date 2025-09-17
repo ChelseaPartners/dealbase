@@ -2,18 +2,28 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-// Mock the API calls
-vi.mock('@tanstack/react-query', async () => {
-  const actual = await vi.importActual('@tanstack/react-query') as any
-  return {
-    ...actual,
-    useQuery: vi.fn(() => ({
-      data: [],
-      isLoading: false,
-      error: null,
-    })),
-  }
-})
+// Mock Next.js navigation
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+  useParams: () => ({ id: '1' }),
+  usePathname: () => '/deals/1',
+  useSearchParams: () => new URLSearchParams(),
+}))
+
+// Mock fetch globally
+global.fetch = vi.fn(() =>
+  Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve([]),
+  })
+) as any
 
 // Test wrapper with QueryClient
 function TestWrapper({ children }: { children: React.ReactNode }) {
@@ -46,12 +56,6 @@ describe('Page Smoke Tests', () => {
   })
 
   it('renders deal detail page without crashing', async () => {
-    // Mock the useParams hook
-    vi.doMock('next/navigation', () => ({
-      useParams: () => ({ id: '1' }),
-      useRouter: () => ({ push: vi.fn() }),
-    }))
-    
     const { default: DealDetailPage } = await import('../app/deals/[id]/page')
     
     render(
