@@ -7,11 +7,70 @@ from sqlmodel import Session, select
 from pydantic import BaseModel
 import pandas as pd
 import io
+import os
+import hashlib
+from pathlib import Path
+from datetime import datetime
 
 from ..database import get_session
-from ..models import Deal, T12Normalized, RentRollNormalized, UnitMixSummary, RentRollAssumptions
+from ..models import Deal, T12Normalized, RentRollNormalized, UnitMixSummary, RentRollAssumptions, DealDocument
 
 router = APIRouter()
+
+
+def save_document(deal_id: int, file: UploadFile, file_type: str, session: Session) -> DealDocument:
+    """Save uploaded file and create document record."""
+    
+    # Create uploads directory if it doesn't exist
+    uploads_dir = Path(__file__).parent.parent / "uploads"
+    uploads_dir.mkdir(exist_ok=True)
+    
+    # Generate unique filename
+    file_extension = Path(file.filename).suffix if file.filename else ""
+    filename = f"deal_{deal_id}_{file_type}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{file_extension}"
+    file_path = uploads_dir / filename
+    
+    # Read file content and calculate hash
+    content = file.file.read()
+    file_hash = hashlib.md5(content).hexdigest()
+    
+    # Save file to disk
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
+    # Clear existing documents of this type for this deal
+    existing_docs = session.exec(
+        select(DealDocument).where(
+            DealDocument.deal_id == deal_id,
+            DealDocument.file_type == file_type
+        )
+    ).all()
+    
+    for doc in existing_docs:
+        # Delete the old file
+        old_file_path = Path(doc.file_path)
+        if old_file_path.exists():
+            old_file_path.unlink()
+        session.delete(doc)
+    
+    # Create new document record
+    document = DealDocument(
+        deal_id=deal_id,
+        filename=filename,
+        original_filename=file.filename or f"uploaded_file{file_extension}",
+        file_type=file_type,
+        file_size=len(content),
+        content_type=file.content_type or "application/octet-stream",
+        file_path=str(file_path),
+        file_hash=file_hash,
+        processing_status="pending"
+    )
+    
+    session.add(document)
+    session.commit()
+    session.refresh(document)
+    
+    return document
 
 
 class IntakeResponse(BaseModel):
@@ -262,7 +321,11 @@ async def upload_rentroll(
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
     
-    # Read file content
+    # Save the raw document first
+    document = save_document(deal_id, file, "rent_roll", session)
+    print(f"DEBUG: Saved document: {document.original_filename} -> {document.filename}")
+    
+    # Read file content for processing
     content = await file.read()
     
     # Parse based on file extension
@@ -382,6 +445,38 @@ async def upload_rentroll(
             "error": str(e),
             "traceback": error_traceback
         }
+
+
+@router.get("/deals/{deal_id}/documents")
+async def get_deal_documents(
+    deal_id: int,
+    session: Session = Depends(get_session)
+) -> List[Dict[str, Any]]:
+    """Get all documents for a deal."""
+    # Verify deal exists
+    deal = session.get(Deal, deal_id)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    
+    # Get documents
+    documents = session.exec(
+        select(DealDocument).where(DealDocument.deal_id == deal_id)
+        .order_by(DealDocument.created_at.desc())
+    ).all()
+    
+    return [
+        {
+            "id": doc.id,
+            "filename": doc.original_filename,
+            "file_type": doc.file_type,
+            "file_size": doc.file_size,
+            "processing_status": doc.processing_status,
+            "processing_error": doc.processing_error,
+            "created_at": doc.created_at.isoformat(),
+            "updated_at": doc.updated_at.isoformat()
+        }
+        for doc in documents
+    ]
 
 
 @router.post("/intake/rentroll/commit/{deal_id}")

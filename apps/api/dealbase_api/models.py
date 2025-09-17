@@ -41,6 +41,7 @@ class Deal(DealBase, table=True):
     t12_data: List["T12Normalized"] = Relationship(back_populates="deal")
     rent_roll_data: List["RentRollNormalized"] = Relationship(back_populates="deal")
     audit_events: List["AuditEvent"] = Relationship(back_populates="deal")
+    documents: List["DealDocument"] = Relationship(back_populates="deal")
 
 
 class T12Normalized(SQLModel, table=True):
@@ -214,3 +215,33 @@ class AuditEvent(SQLModel, table=True):
 
     # Relationships
     deal: Optional[Deal] = Relationship(back_populates="audit_events")
+
+
+class DealDocument(SQLModel, table=True):
+    """Raw documents uploaded for deals."""
+    
+    __tablename__ = "deal_documents"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    deal_id: int = Field(foreign_key="deals.id")
+    
+    # Document metadata
+    filename: str = Field(index=True)
+    original_filename: str  # Keep original name for display
+    file_type: str  # 'rent_roll', 't12', etc.
+    file_size: int  # Size in bytes
+    content_type: str  # MIME type
+    
+    # File storage
+    file_path: str  # Path to stored file
+    file_hash: Optional[str] = None  # For deduplication
+    
+    # Processing status
+    processing_status: str = Field(default="pending")  # pending, processing, completed, failed
+    processing_error: Optional[str] = None
+    
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Relationships
+    deal: Optional[Deal] = Relationship(back_populates="documents")
