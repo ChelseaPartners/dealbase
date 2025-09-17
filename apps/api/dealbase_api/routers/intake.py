@@ -44,19 +44,36 @@ async def intake_t12(
     elif file.filename.endswith(('.xlsx', '.xls')):
         # Try different header positions to find the actual column headers
         df = None
-        for header_row in range(5):  # Try headers 0-4
+        
+        # First, let's see what's in the first few rows
+        print(f"DEBUG: Analyzing Excel file structure...")
+        for row_num in range(10):
+            try:
+                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1)
+                print(f"DEBUG: Row {row_num} columns: {list(test_df.columns)}")
+            except:
+                break
+        
+        # Now try to find the best header position
+        for header_row in range(10):  # Try headers 0-9
             try:
                 test_df = pd.read_excel(io.BytesIO(content), header=header_row)
                 
                 # Check if we found meaningful column names
-                meaningful_cols = sum(1 for col in test_df.columns 
-                                    if not col.startswith('Unnamed:') and 
-                                    str(col).strip() not in ['', 'nan', 'NaN'])
+                meaningful_cols = []
+                for col in test_df.columns:
+                    col_str = str(col).strip()
+                    if (not col_str.startswith('Unnamed:') and 
+                        col_str not in ['', 'nan', 'NaN', 'None'] and
+                        len(col_str) > 1):
+                        meaningful_cols.append(col_str)
                 
-                if meaningful_cols >= 3:  # Need at least 3 meaningful columns
+                print(f"DEBUG: Header {header_row}: {len(meaningful_cols)} meaningful columns: {meaningful_cols}")
+                
+                if len(meaningful_cols) >= 3:  # Need at least 3 meaningful columns
                     df = test_df
-                    print(f"DEBUG: Using header={header_row}, found {meaningful_cols} meaningful columns")
-                    print(f"DEBUG: Columns: {list(df.columns)}")
+                    print(f"DEBUG: ✅ Using header={header_row}, found {len(meaningful_cols)} meaningful columns")
+                    print(f"DEBUG: Final columns: {list(df.columns)}")
                     break
                     
             except Exception as e:
@@ -65,7 +82,7 @@ async def intake_t12(
         
         # If still no good columns found, use the original approach
         if df is None:
-            print(f"DEBUG: No good header found, using default")
+            print(f"DEBUG: ❌ No good header found, using default")
             df = pd.read_excel(io.BytesIO(content))
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
@@ -162,19 +179,36 @@ async def preview_rentroll(
     elif file.filename.endswith(('.xlsx', '.xls')):
         # Try different header positions to find the actual column headers
         df = None
-        for header_row in range(5):  # Try headers 0-4
+        
+        # First, let's see what's in the first few rows
+        print(f"DEBUG: Analyzing Excel file structure...")
+        for row_num in range(10):
+            try:
+                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1)
+                print(f"DEBUG: Row {row_num} columns: {list(test_df.columns)}")
+            except:
+                break
+        
+        # Now try to find the best header position
+        for header_row in range(10):  # Try headers 0-9
             try:
                 test_df = pd.read_excel(io.BytesIO(content), header=header_row)
                 
                 # Check if we found meaningful column names
-                meaningful_cols = sum(1 for col in test_df.columns 
-                                    if not col.startswith('Unnamed:') and 
-                                    str(col).strip() not in ['', 'nan', 'NaN'])
+                meaningful_cols = []
+                for col in test_df.columns:
+                    col_str = str(col).strip()
+                    if (not col_str.startswith('Unnamed:') and 
+                        col_str not in ['', 'nan', 'NaN', 'None'] and
+                        len(col_str) > 1):
+                        meaningful_cols.append(col_str)
                 
-                if meaningful_cols >= 3:  # Need at least 3 meaningful columns
+                print(f"DEBUG: Header {header_row}: {len(meaningful_cols)} meaningful columns: {meaningful_cols}")
+                
+                if len(meaningful_cols) >= 3:  # Need at least 3 meaningful columns
                     df = test_df
-                    print(f"DEBUG: Using header={header_row}, found {meaningful_cols} meaningful columns")
-                    print(f"DEBUG: Columns: {list(df.columns)}")
+                    print(f"DEBUG: ✅ Using header={header_row}, found {len(meaningful_cols)} meaningful columns")
+                    print(f"DEBUG: Final columns: {list(df.columns)}")
                     break
                     
             except Exception as e:
@@ -183,7 +217,7 @@ async def preview_rentroll(
         
         # If still no good columns found, use the original approach
         if df is None:
-            print(f"DEBUG: No good header found, using default")
+            print(f"DEBUG: ❌ No good header found, using default")
             df = pd.read_excel(io.BytesIO(content))
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
@@ -237,19 +271,36 @@ async def upload_rentroll(
     elif file.filename.endswith(('.xlsx', '.xls')):
         # Try different header positions to find the actual column headers
         df = None
-        for header_row in range(5):  # Try headers 0-4
+        
+        # First, let's see what's in the first few rows
+        print(f"DEBUG: Analyzing Excel file structure...")
+        for row_num in range(10):
+            try:
+                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1)
+                print(f"DEBUG: Row {row_num} columns: {list(test_df.columns)}")
+            except:
+                break
+        
+        # Now try to find the best header position
+        for header_row in range(10):  # Try headers 0-9
             try:
                 test_df = pd.read_excel(io.BytesIO(content), header=header_row)
                 
                 # Check if we found meaningful column names
-                meaningful_cols = sum(1 for col in test_df.columns 
-                                    if not col.startswith('Unnamed:') and 
-                                    str(col).strip() not in ['', 'nan', 'NaN'])
+                meaningful_cols = []
+                for col in test_df.columns:
+                    col_str = str(col).strip()
+                    if (not col_str.startswith('Unnamed:') and 
+                        col_str not in ['', 'nan', 'NaN', 'None'] and
+                        len(col_str) > 1):
+                        meaningful_cols.append(col_str)
                 
-                if meaningful_cols >= 3:  # Need at least 3 meaningful columns
+                print(f"DEBUG: Header {header_row}: {len(meaningful_cols)} meaningful columns: {meaningful_cols}")
+                
+                if len(meaningful_cols) >= 3:  # Need at least 3 meaningful columns
                     df = test_df
-                    print(f"DEBUG: Using header={header_row}, found {meaningful_cols} meaningful columns")
-                    print(f"DEBUG: Columns: {list(df.columns)}")
+                    print(f"DEBUG: ✅ Using header={header_row}, found {len(meaningful_cols)} meaningful columns")
+                    print(f"DEBUG: Final columns: {list(df.columns)}")
                     break
                     
             except Exception as e:
@@ -258,7 +309,7 @@ async def upload_rentroll(
         
         # If still no good columns found, use the original approach
         if df is None:
-            print(f"DEBUG: No good header found, using default")
+            print(f"DEBUG: ❌ No good header found, using default")
             df = pd.read_excel(io.BytesIO(content))
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
