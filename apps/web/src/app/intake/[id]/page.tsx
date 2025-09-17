@@ -1,93 +1,249 @@
 'use client'
 
-import { useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useState, useCallback } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { ArrowLeft, Building2, Upload, FileText, CheckCircle } from 'lucide-react'
-import { IntakeResponse } from '@dealbase/shared'
+import { ArrowLeft, Building2, Upload, FileText, CheckCircle, AlertCircle, Download, Trash2 } from 'lucide-react'
+import { Deal } from '@dealbase/shared'
+
+async function fetchDeal(id: string): Promise<Deal> {
+  const response = await fetch(`/api/deals/${id}`)
+  if (!response.ok) {
+    throw new Error('Failed to fetch deal')
+  }
+  return response.json()
+}
+
+interface FileUploadProps {
+  type: 't12' | 'rentroll'
+  dealId: string
+  onUpload: (file: File) => Promise<void>
+  isUploading: boolean
+}
+
+function FileUpload({ type, dealId, onUpload, isUploading }: FileUploadProps) {
+  const [dragActive, setDragActive] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+
+  const handleDrag = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true)
+    } else if (e.type === 'dragleave') {
+      setDragActive(false)
+    }
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragActive(false)
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0]
+      if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+        setSelectedFile(file)
+      }
+    }
+  }, [])
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0])
+    }
+  }
+
+  const handleUpload = async () => {
+    if (selectedFile) {
+      await onUpload(selectedFile)
+      setSelectedFile(null)
+    }
+  }
+
+  const isT12 = type === 't12'
+  const title = isT12 ? 'T-12 Financial Data' : 'Rent Roll Data'
+  const description = isT12 
+    ? 'Upload 12 months of trailing financial data (income, expenses, NOI)'
+    : 'Upload unit-level rent roll data (units, rents, lease terms)'
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+          <p className="text-sm text-gray-600">{description}</p>
+        </div>
+        <FileText className="h-6 w-6 text-primary-600" />
+      </div>
+
+      <div
+        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+          dragActive
+            ? 'border-primary-400 bg-primary-50'
+            : selectedFile
+            ? 'border-green-400 bg-green-50'
+            : 'border-gray-300 hover:border-gray-400'
+        }`}
+        onDragEnter={handleDrag}
+        onDragLeave={handleDrag}
+        onDragOver={handleDrag}
+        onDrop={handleDrop}
+      >
+        {selectedFile ? (
+          <div className="space-y-4">
+            <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
+            <div>
+              <p className="text-sm font-medium text-gray-900">{selectedFile.name}</p>
+              <p className="text-sm text-gray-500">
+                {(selectedFile.size / 1024).toFixed(1)} KB
+              </p>
+            </div>
+            <div className="flex justify-center space-x-3">
+              <button
+                onClick={() => setSelectedFile(null)}
+                className="btn btn-secondary btn-sm"
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Remove
+              </button>
+              <button
+                onClick={handleUpload}
+                disabled={isUploading}
+                className="btn btn-primary btn-sm"
+              >
+                {isUploading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4 mr-1" />
+                    Upload
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <Upload className="h-12 w-12 text-gray-400 mx-auto" />
+            <div>
+              <p className="text-sm font-medium text-gray-900">
+                Drop your CSV file here, or{' '}
+                <label className="text-primary-600 hover:text-primary-500 cursor-pointer">
+                  browse
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                </label>
+              </p>
+              <p className="text-sm text-gray-500">CSV files only, max 10MB</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Sample Data Link */}
+      <div className="mt-4 text-center">
+        <a
+          href={`/api/sample/${type}`}
+          className="text-sm text-primary-600 hover:text-primary-500 flex items-center justify-center"
+        >
+          <Download className="h-4 w-4 mr-1" />
+          Download sample {isT12 ? 'T-12' : 'Rent Roll'} template
+        </a>
+      </div>
+    </div>
+  )
+}
 
 export default function IntakePage() {
   const params = useParams()
+  const router = useRouter()
   const dealId = params.id as string
-  
-  const [t12File, setT12File] = useState<File | null>(null)
-  const [rentRollFile, setRentRollFile] = useState<File | null>(null)
-  const [t12Result, setT12Result] = useState<IntakeResponse | null>(null)
-  const [rentRollResult, setRentRollResult] = useState<IntakeResponse | null>(null)
-  const [isUploading, setIsUploading] = useState(false)
 
-  const handleT12Upload = async () => {
-    if (!t12File) return
+  const { data: deal, isLoading, error } = useQuery({
+    queryKey: ['deal', dealId],
+    queryFn: () => fetchDeal(dealId),
+  })
+
+  const [isUploadingT12, setIsUploadingT12] = useState(false)
+  const [isUploadingRentRoll, setIsUploadingRentRoll] = useState(false)
+  const [uploadStatus, setUploadStatus] = useState<Record<string, { success: boolean; message: string }>>({})
+
+  const handleFileUpload = async (type: 't12' | 'rentroll', file: File) => {
+    const setIsUploading = type === 't12' ? setIsUploadingT12 : setIsUploadingRentRoll
     
     setIsUploading(true)
+    setUploadStatus(prev => ({ ...prev, [type]: { success: false, message: 'Uploading...' } }))
+
     try {
       const formData = new FormData()
-      formData.append('file', t12File)
-      
-      const response = await fetch(`/api/intake/t12/${dealId}`, {
+      formData.append('file', file)
+
+      const response = await fetch(`/api/intake/${type}/${dealId}`, {
         method: 'POST',
         body: formData,
       })
-      
+
+      if (!response.ok) {
+        throw new Error('Upload failed')
+      }
+
       const result = await response.json()
-      setT12Result(result)
+      setUploadStatus(prev => ({ 
+        ...prev, 
+        [type]: { success: true, message: 'Upload successful!' } 
+      }))
+
+      // Redirect to deal detail page after successful upload
+      setTimeout(() => {
+        router.push(`/deals/${dealId}`)
+      }, 1500)
+
     } catch (error) {
-      console.error('Error uploading T-12:', error)
-      alert('Failed to upload T-12 file')
+      console.error('Upload error:', error)
+      setUploadStatus(prev => ({ 
+        ...prev, 
+        [type]: { success: false, message: 'Upload failed. Please try again.' } 
+      }))
     } finally {
       setIsUploading(false)
     }
   }
 
-  const handleRentRollUpload = async () => {
-    if (!rentRollFile) return
-    
-    setIsUploading(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', rentRollFile)
-      
-      const response = await fetch(`/api/intake/rentroll/${dealId}`, {
-        method: 'POST',
-        body: formData,
-      })
-      
-      const result = await response.json()
-      setRentRollResult(result)
-    } catch (error) {
-      console.error('Error uploading rent roll:', error)
-      alert('Failed to upload rent roll file')
-    } finally {
-      setIsUploading(false)
-    }
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading deal...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !deal) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600">Error loading deal: {error?.message}</p>
+          <Link href="/deals" className="mt-4 btn btn-primary">
+            Back to Deals
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <Building2 className="h-8 w-8 text-primary-600" />
-              <h1 className="ml-2 text-xl font-bold text-gray-900">DealBase</h1>
-            </div>
-            <nav className="flex space-x-8">
-              <Link href="/deals" className="text-gray-700 hover:text-primary-600">
-                Deals
-              </Link>
-              <Link href="/intake" className="text-primary-600 font-medium">
-                Intake
-              </Link>
-              <Link href="/valuation" className="text-gray-700 hover:text-primary-600">
-                Valuation
-              </Link>
-            </nav>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <Link
             href={`/deals/${dealId}`}
@@ -96,179 +252,78 @@ export default function IntakePage() {
             <ArrowLeft className="h-4 w-4 mr-1" />
             Back to Deal
           </Link>
-          <h1 className="mt-4 text-3xl font-bold text-gray-900">Data Intake</h1>
-          <p className="mt-2 text-gray-600">Upload and validate your T-12 and Rent Roll data</p>
+          <div className="mt-4">
+            <h1 className="text-3xl font-bold text-gray-900">Data Intake</h1>
+            <p className="mt-2 text-gray-600">
+              Upload financial data for <span className="font-medium">{deal.name}</span>
+            </p>
+          </div>
         </div>
 
+        {/* Upload Status Messages */}
+        {Object.entries(uploadStatus).map(([type, status]) => (
+          <div
+            key={type}
+            className={`mb-4 p-4 rounded-lg flex items-center ${
+              status.success
+                ? 'bg-green-50 border border-green-200'
+                : 'bg-red-50 border border-red-200'
+            }`}
+          >
+            {status.success ? (
+              <CheckCircle className="h-5 w-5 text-green-500 mr-2" />
+            ) : (
+              <AlertCircle className="h-5 w-5 text-red-500 mr-2" />
+            )}
+            <span className={`text-sm font-medium ${
+              status.success ? 'text-green-800' : 'text-red-800'
+            }`}>
+              {status.message}
+            </span>
+          </div>
+        ))}
+
+        {/* Upload Sections */}
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-          {/* T-12 Upload */}
-          <div className="card">
-            <div className="flex items-center mb-4">
-              <FileText className="h-6 w-6 text-primary-600 mr-2" />
-              <h2 className="text-lg font-medium text-gray-900">T-12 Data</h2>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Upload T-12 File (CSV or Excel)
-                </label>
-                <input
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  onChange={(e) => setT12File(e.target.files?.[0] || null)}
-                  className="input"
-                />
-              </div>
-              
-              <button
-                onClick={handleT12Upload}
-                disabled={!t12File || isUploading}
-                className="btn btn-primary w-full disabled:opacity-50"
-              >
-                {isUploading ? 'Uploading...' : 'Upload T-12'}
-              </button>
-              
-              {t12Result && (
-                <div className={`p-4 rounded-lg ${
-                  t12Result.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
-                }`}>
-                  <div className="flex items-center">
-                    <CheckCircle className={`h-5 w-5 mr-2 ${
-                      t12Result.success ? 'text-green-600' : 'text-red-600'
-                    }`} />
-                    <span className={`font-medium ${
-                      t12Result.success ? 'text-green-800' : 'text-red-800'
-                    }`}>
-                      {t12Result.message}
-                    </span>
-                  </div>
-                  
-                  {t12Result.success && t12Result.preview_data.length > 0 && (
-                    <div className="mt-4">
-                      <h4 className="text-sm font-medium text-gray-900 mb-2">Preview Data</h4>
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full text-sm">
-                          <thead>
-                            <tr className="border-b">
-                              {Object.keys(t12Result.preview_data[0]).map((key) => (
-                                <th key={key} className="text-left py-2 pr-4">{key}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {t12Result.preview_data.slice(0, 5).map((row, index) => (
-                              <tr key={index} className="border-b">
-                                {Object.values(row).map((value, i) => (
-                                  <td key={i} className="py-2 pr-4">{String(value)}</td>
-                                ))}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+          <FileUpload
+            type="t12"
+            dealId={dealId}
+            onUpload={(file) => handleFileUpload('t12', file)}
+            isUploading={isUploadingT12}
+          />
+          
+          <FileUpload
+            type="rentroll"
+            dealId={dealId}
+            onUpload={(file) => handleFileUpload('rentroll', file)}
+            isUploading={isUploadingRentRoll}
+          />
+        </div>
 
-          {/* Rent Roll Upload */}
-          <div className="card">
-            <div className="flex items-center mb-4">
-              <Upload className="h-6 w-6 text-primary-600 mr-2" />
-              <h2 className="text-lg font-medium text-gray-900">Rent Roll Data</h2>
+        {/* Instructions */}
+        <div className="mt-8 card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Requirements</h3>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <div>
+              <h4 className="font-medium text-gray-900 mb-2">T-12 Financial Data</h4>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>• 12 months of trailing data</li>
+                <li>• Gross rent, other income, operating expenses</li>
+                <li>• Net operating income (NOI)</li>
+                <li>• CSV format with month/year columns</li>
+              </ul>
             </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Upload Rent Roll File (CSV or Excel)
-                </label>
-                <input
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  onChange={(e) => setRentRollFile(e.target.files?.[0] || null)}
-                  className="input"
-                />
-              </div>
-              
-              <button
-                onClick={handleRentRollUpload}
-                disabled={!rentRollFile || isUploading}
-                className="btn btn-primary w-full disabled:opacity-50"
-              >
-                {isUploading ? 'Uploading...' : 'Upload Rent Roll'}
-              </button>
-              
-              {rentRollResult && (
-                <div className={`p-4 rounded-lg ${
-                  rentRollResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
-                }`}>
-                  <div className="flex items-center">
-                    <CheckCircle className={`h-5 w-5 mr-2 ${
-                      rentRollResult.success ? 'text-green-600' : 'text-red-600'
-                    }`} />
-                    <span className={`font-medium ${
-                      rentRollResult.success ? 'text-green-800' : 'text-red-800'
-                    }`}>
-                      {rentRollResult.message}
-                    </span>
-                  </div>
-                  
-                  {rentRollResult.success && rentRollResult.preview_data.length > 0 && (
-                    <div className="mt-4">
-                      <h4 className="text-sm font-medium text-gray-900 mb-2">Preview Data</h4>
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full text-sm">
-                          <thead>
-                            <tr className="border-b">
-                              {Object.keys(rentRollResult.preview_data[0]).map((key) => (
-                                <th key={key} className="text-left py-2 pr-4">{key}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {rentRollResult.preview_data.slice(0, 5).map((row, index) => (
-                              <tr key={index} className="border-b">
-                                {Object.values(row).map((value, i) => (
-                                  <td key={i} className="py-2 pr-4">{String(value)}</td>
-                                ))}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+            <div>
+              <h4 className="font-medium text-gray-900 mb-2">Rent Roll Data</h4>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>• Unit-level rent information</li>
+                <li>• Unit numbers, types, square footage</li>
+                <li>• Current rent and market rent</li>
+                <li>• Lease start/end dates</li>
+              </ul>
             </div>
           </div>
         </div>
-
-        {/* Next Steps */}
-        {(t12Result?.success || rentRollResult?.success) && (
-          <div className="mt-8 card">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Next Steps</h3>
-            <div className="flex space-x-4">
-              <Link
-                href={`/valuation/${dealId}`}
-                className="btn btn-primary"
-              >
-                Run Valuation
-              </Link>
-              <Link
-                href={`/deals/${dealId}`}
-                className="btn btn-secondary"
-              >
-                View Deal Details
-              </Link>
-            </div>
-          </div>
-        )}
-      </main>
     </div>
   )
 }

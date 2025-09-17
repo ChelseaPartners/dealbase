@@ -3,32 +3,7 @@ import { Building2, Calculator, FileText, BarChart3 } from 'lucide-react'
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <Building2 className="h-8 w-8 text-primary-600" />
-              <h1 className="ml-2 text-xl font-bold text-gray-900">DealBase</h1>
-            </div>
-            <nav className="flex space-x-8">
-              <Link href="/deals" className="text-gray-700 hover:text-primary-600">
-                Deals
-              </Link>
-              <Link href="/intake" className="text-gray-700 hover:text-primary-600">
-                Intake
-              </Link>
-              <Link href="/valuation" className="text-gray-700 hover:text-primary-600">
-                Valuation
-              </Link>
-            </nav>
-          </div>
-        </div>
-      </header>
-
-      {/* Hero Section */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="text-center">
           <h1 className="text-4xl font-bold text-gray-900 sm:text-5xl md:text-6xl">
             Commercial Real Estate
@@ -85,7 +60,6 @@ export default function HomePage() {
             </div>
           </div>
         </div>
-      </main>
     </div>
   )
 }

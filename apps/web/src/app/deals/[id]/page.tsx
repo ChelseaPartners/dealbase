@@ -1,114 +1,30 @@
-'use client'
-
-import { useState, useEffect } from 'react'
-import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Building2, MapPin, Calendar, Download, Upload, Calculator, Trash2 } from 'lucide-react'
-import ConfirmationDialog from '@/components/ConfirmationDialog'
-import Toast from '@/components/Toast'
+import { ArrowLeft, Building2, MapPin, Calendar, Download, Upload, Calculator } from 'lucide-react'
 import { Deal } from '@/types/deal'
 
-export default function DealDetailPage() {
-  const params = useParams()
-  const router = useRouter()
-  const dealId = params.id as string
-  const [deal, setDeal] = useState<Deal | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  
-  // Delete functionality state
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [toast, setToast] = useState<{
-    message: string
-    type: 'success' | 'error'
-    isVisible: boolean
-  }>({
-    message: '',
-    type: 'success',
-    isVisible: false
-  })
-
-  // Fetch deal data from API
-  useEffect(() => {
-    const fetchDeal = async () => {
-      try {
-        setIsLoading(true)
-        const response = await fetch(`/api/deals/${dealId}`)
-        if (!response.ok) {
-          throw new Error('Deal not found')
-        }
-        const data = await response.json()
-        setDeal(data)
-      } catch (err) {
-        console.error('Error fetching deal:', err)
-        setError(err instanceof Error ? err.message : 'An error occurred')
-      } finally {
-        setIsLoading(false)
-      }
+// Server-side data fetching
+async function getDeal(id: string): Promise<Deal | null> {
+  try {
+    const response = await fetch(`http://localhost:8000/api/deals/${id}`, {
+      cache: 'no-store', // Always fetch fresh data
+    })
+    
+    if (!response.ok) {
+      return null
     }
-
-    if (dealId) {
-      fetchDeal()
-    }
-  }, [dealId])
-
-  // Delete deal function
-  const handleDeleteDeal = async () => {
-    if (!deal) return
-
-    try {
-      setIsDeleting(true)
-      console.log('Deleting deal:', deal.id)
-      
-      const response = await fetch(`/api/deals/${dealId}`, {
-        method: 'DELETE',
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error || 'Failed to delete deal')
-      }
-
-      // Show success toast
-      setToast({
-        message: 'Deal deleted.',
-        type: 'success',
-        isVisible: true
-      })
-
-      // Navigate back to deals list after a short delay
-      setTimeout(() => {
-        router.push('/deals')
-      }, 1000)
-
-    } catch (err) {
-      console.error('Error deleting deal:', err)
-      setToast({
-        message: "Couldn't delete deal. Try again.",
-        type: 'error',
-        isVisible: true
-      })
-    } finally {
-      setIsDeleting(false)
-      setShowDeleteDialog(false)
-    }
+    
+    return await response.json()
+  } catch (error) {
+    console.error('Error fetching deal:', error)
+    return null
   }
+}
 
-  // Show delete confirmation dialog
-  const handleDeleteClick = () => {
-    setShowDeleteDialog(true)
-  }
-
-  // Close delete dialog
-  const handleDeleteCancel = () => {
-    setShowDeleteDialog(false)
-  }
-
-  // Close toast
-  const handleToastClose = () => {
-    setToast(prev => ({ ...prev, isVisible: false }))
-  }
+export default async function DealDetailPage({ params }: { params: { id: string } }) {
+  const dealId = params.id
+  const deal = await getDeal(dealId)
+  const isLoading = false
+  const error = deal ? null : 'Deal not found'
 
   if (isLoading) {
     return (
@@ -193,15 +109,6 @@ export default function DealDetailPage() {
               <Download className="h-4 w-4 mr-2" />
               Export
             </a>
-            <button
-              onClick={handleDeleteClick}
-              disabled={isDeleting}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-              aria-label={`Delete deal ${deal.name}`}
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete
-            </button>
           </div>
         </div>
       </div>
@@ -270,27 +177,6 @@ export default function DealDetailPage() {
         <h3 className="text-lg font-medium text-gray-900 mb-4">Valuation Runs</h3>
         <p className="text-gray-500">No valuation runs yet. Run your first valuation to see results.</p>
       </div>
-
-      {/* Confirmation Dialog */}
-      <ConfirmationDialog
-        isOpen={showDeleteDialog}
-        onClose={handleDeleteCancel}
-        onConfirm={handleDeleteDeal}
-        title="Delete deal?"
-        message={`This permanently deletes '${deal?.name}'. This cannot be undone.`}
-        confirmText="Delete"
-        cancelText="Cancel"
-        isLoading={isDeleting}
-        type="danger"
-      />
-
-      {/* Toast Notification */}
-      <Toast
-        message={toast.message}
-        type={toast.type}
-        isVisible={toast.isVisible}
-        onClose={handleToastClose}
-      />
     </div>
   )
 }

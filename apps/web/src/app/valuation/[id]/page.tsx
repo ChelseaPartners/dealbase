@@ -1,11 +1,19 @@
 'use client'
 
 import { useState } from 'react'
-import { useParams } from 'next/navigation'
-import Link from 'next/link'
-import { ArrowLeft, Building2, Calculator, Play, History } from 'lucide-react'
-import { ValuationRequest, ValuationRun } from '@dealbase/shared'
+import { useParams, useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
+import Link from 'next/link'
+import { ArrowLeft, Building2, Calculator, Play, Settings, BarChart3, Save, RotateCcw } from 'lucide-react'
+import { Deal, ValuationRun, ValuationRequest } from '@dealbase/shared'
+
+async function fetchDeal(id: string): Promise<Deal> {
+  const response = await fetch(`/api/deals/${id}`)
+  if (!response.ok) {
+    throw new Error('Failed to fetch deal')
+  }
+  return response.json()
+}
 
 async function fetchValuationRuns(dealId: string): Promise<ValuationRun[]> {
   const response = await fetch(`/api/valuation/runs/${dealId}`)
@@ -15,103 +23,167 @@ async function fetchValuationRuns(dealId: string): Promise<ValuationRun[]> {
   return response.json()
 }
 
+interface ValuationFormData {
+  name: string
+  purchase_price: number
+  loan_amount: number
+  exit_cap_rate: number
+  hold_period: number
+  interest_rate: number
+  vacancy_rate: number
+  expense_ratio: number
+}
+
+const defaultAssumptions: ValuationFormData = {
+  name: 'Base Case',
+  purchase_price: 10000000,
+  loan_amount: 7000000,
+  exit_cap_rate: 0.05,
+  hold_period: 10,
+  interest_rate: 0.05,
+  vacancy_rate: 0.05,
+  expense_ratio: 0.35
+}
+
 export default function ValuationPage() {
   const params = useParams()
+  const router = useRouter()
   const dealId = params.id as string
-  
-  const [formData, setFormData] = useState<ValuationRequest>({
-    name: '',
-    assumptions: {
-      purchase_price: 1000000,
-      loan_amount: 800000,
-      exit_cap_rate: 0.05,
-      hold_period: 5,
-      interest_rate: 0.05,
-      vacancy_rate: 0.05,
-      expense_ratio: 0.35,
-    }
-  })
-  const [isRunning, setIsRunning] = useState(false)
 
-  const { data: valuationRuns, refetch } = useQuery({
+  const { data: deal, isLoading: dealLoading, error: dealError } = useQuery({
+    queryKey: ['deal', dealId],
+    queryFn: () => fetchDeal(dealId),
+  })
+
+  const { data: valuationRuns, isLoading: runsLoading } = useQuery({
     queryKey: ['valuation-runs', dealId],
     queryFn: () => fetchValuationRuns(dealId),
   })
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsRunning(true)
+  const [formData, setFormData] = useState<ValuationFormData>(defaultAssumptions)
+  const [isRunning, setIsRunning] = useState(false)
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
+  const handleInputChange = (field: keyof ValuationFormData, value: string | number) => {
+    setFormData(prev => ({ ...prev, [field]: value }))
+    if (errors[field]) {
+      setErrors(prev => ({ ...prev, [field]: '' }))
+    }
+  }
+
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {}
+    
+    if (!formData.name.trim()) {
+      newErrors.name = 'Valuation name is required'
+    }
+    
+    if (formData.purchase_price <= 0) {
+      newErrors.purchase_price = 'Purchase price must be greater than 0'
+    }
+    
+    if (formData.loan_amount < 0 || formData.loan_amount > formData.purchase_price) {
+      newErrors.loan_amount = 'Loan amount must be between 0 and purchase price'
+    }
+    
+    if (formData.exit_cap_rate <= 0 || formData.exit_cap_rate > 1) {
+      newErrors.exit_cap_rate = 'Exit cap rate must be between 0% and 100%'
+    }
+    
+    if (formData.hold_period <= 0) {
+      newErrors.hold_period = 'Hold period must be greater than 0'
+    }
+    
+    if (formData.interest_rate < 0 || formData.interest_rate > 1) {
+      newErrors.interest_rate = 'Interest rate must be between 0% and 100%'
+    }
+    
+    if (formData.vacancy_rate < 0 || formData.vacancy_rate > 1) {
+      newErrors.vacancy_rate = 'Vacancy rate must be between 0% and 100%'
+    }
+    
+    if (formData.expense_ratio < 0 || formData.expense_ratio > 1) {
+      newErrors.expense_ratio = 'Expense ratio must be between 0% and 100%'
+    }
+    
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
+  const handleRunValuation = async () => {
+    if (!validateForm()) {
+      return
+    }
+    
+    setIsRunning(true)
+    
     try {
+      const request: ValuationRequest = {
+        name: formData.name,
+        assumptions: {
+          purchase_price: formData.purchase_price,
+          loan_amount: formData.loan_amount,
+          exit_cap_rate: formData.exit_cap_rate,
+          hold_period: formData.hold_period,
+          interest_rate: formData.interest_rate,
+          vacancy_rate: formData.vacancy_rate,
+          expense_ratio: formData.expense_ratio,
+        }
+      }
+
       const response = await fetch(`/api/valuation/run/${dealId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(request),
       })
-
+      
       if (!response.ok) {
         throw new Error('Failed to run valuation')
       }
-
-      // Refresh the valuation runs
-      await refetch()
       
-      // Reset form
-      setFormData(prev => ({
-        ...prev,
-        name: '',
-      }))
+      // Redirect to deal detail page to see results
+      router.push(`/deals/${dealId}`)
     } catch (error) {
       console.error('Error running valuation:', error)
-      alert('Failed to run valuation. Please try again.')
+      setErrors({ submit: 'Failed to run valuation. Please try again.' })
     } finally {
       setIsRunning(false)
     }
   }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    if (name === 'name') {
-      setFormData(prev => ({ ...prev, [name]: value }))
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        assumptions: {
-          ...prev.assumptions,
-          [name]: parseFloat(value) || 0,
-        }
-      }))
-    }
+  const resetToDefaults = () => {
+    setFormData(defaultAssumptions)
+    setErrors({})
+  }
+
+  if (dealLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading deal...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (dealError || !deal) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600">Error loading deal: {dealError?.message}</p>
+          <Link href="/deals" className="mt-4 btn btn-primary">
+            Back to Deals
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <Building2 className="h-8 w-8 text-primary-600" />
-              <h1 className="ml-2 text-xl font-bold text-gray-900">DealBase</h1>
-            </div>
-            <nav className="flex space-x-8">
-              <Link href="/deals" className="text-gray-700 hover:text-primary-600">
-                Deals
-              </Link>
-              <Link href="/intake" className="text-gray-700 hover:text-primary-600">
-                Intake
-              </Link>
-              <Link href="/valuation" className="text-primary-600 font-medium">
-                Valuation
-              </Link>
-            </nav>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <Link
             href={`/deals/${dealId}`}
@@ -120,142 +192,230 @@ export default function ValuationPage() {
             <ArrowLeft className="h-4 w-4 mr-1" />
             Back to Deal
           </Link>
-          <h1 className="mt-4 text-3xl font-bold text-gray-900">Run Valuation</h1>
-          <p className="mt-2 text-gray-600">Configure assumptions and run valuation analysis</p>
+          <div className="mt-4">
+            <h1 className="text-3xl font-bold text-gray-900">Run Valuation</h1>
+            <p className="mt-2 text-gray-600">
+              Configure assumptions and run valuation for <span className="font-medium">{deal.name}</span>
+            </p>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
           {/* Valuation Form */}
-          <div className="card">
-            <div className="flex items-center mb-4">
-              <Calculator className="h-6 w-6 text-primary-600 mr-2" />
-              <h2 className="text-lg font-medium text-gray-900">Valuation Assumptions</h2>
+          <div className="lg:col-span-2 space-y-6">
+            <div className="card">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-lg font-semibold text-gray-900">Valuation Assumptions</h2>
+                <button
+                  onClick={resetToDefaults}
+                  className="btn btn-secondary btn-sm"
+                >
+                  <RotateCcw className="h-4 w-4 mr-1" />
+                  Reset
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Basic Information */}
+                <div>
+                  <label htmlFor="name" className="label">
+                    Valuation Name *
+                  </label>
+                  <input
+                    type="text"
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => handleInputChange('name', e.target.value)}
+                    className={`input ${errors.name ? 'input-error' : ''}`}
+                    placeholder="e.g., Base Case, Optimistic, Conservative"
+                  />
+                  {errors.name && (
+                    <p className="mt-1 text-sm text-red-600">{errors.name}</p>
+                  )}
+                </div>
+
+                {/* Financial Assumptions */}
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="purchase_price" className="label">
+                      Purchase Price *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                      <input
+                        type="number"
+                        id="purchase_price"
+                        value={formData.purchase_price}
+                        onChange={(e) => handleInputChange('purchase_price', Number(e.target.value))}
+                        className={`input pl-8 ${errors.purchase_price ? 'input-error' : ''}`}
+                        placeholder="10,000,000"
+                      />
+                    </div>
+                    {errors.purchase_price && (
+                      <p className="mt-1 text-sm text-red-600">{errors.purchase_price}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor="loan_amount" className="label">
+                      Loan Amount *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                      <input
+                        type="number"
+                        id="loan_amount"
+                        value={formData.loan_amount}
+                        onChange={(e) => handleInputChange('loan_amount', Number(e.target.value))}
+                        className={`input pl-8 ${errors.loan_amount ? 'input-error' : ''}`}
+                        placeholder="7,000,000"
+                      />
+                    </div>
+                    {errors.loan_amount && (
+                      <p className="mt-1 text-sm text-red-600">{errors.loan_amount}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor="exit_cap_rate" className="label">
+                      Exit Cap Rate *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        id="exit_cap_rate"
+                        value={formData.exit_cap_rate}
+                        onChange={(e) => handleInputChange('exit_cap_rate', Number(e.target.value))}
+                        className={`input pr-8 ${errors.exit_cap_rate ? 'input-error' : ''}`}
+                        placeholder="0.05"
+                        step="0.001"
+                        min="0"
+                        max="1"
+                      />
+                      <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">%</span>
+                    </div>
+                    {errors.exit_cap_rate && (
+                      <p className="mt-1 text-sm text-red-600">{errors.exit_cap_rate}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor="hold_period" className="label">
+                      Hold Period (Years) *
+                    </label>
+                    <input
+                      type="number"
+                      id="hold_period"
+                      value={formData.hold_period}
+                      onChange={(e) => handleInputChange('hold_period', Number(e.target.value))}
+                      className={`input ${errors.hold_period ? 'input-error' : ''}`}
+                      placeholder="10"
+                      min="1"
+                    />
+                    {errors.hold_period && (
+                      <p className="mt-1 text-sm text-red-600">{errors.hold_period}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Market Assumptions */}
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+                  <div>
+                    <label htmlFor="interest_rate" className="label">
+                      Interest Rate
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        id="interest_rate"
+                        value={formData.interest_rate}
+                        onChange={(e) => handleInputChange('interest_rate', Number(e.target.value))}
+                        className={`input pr-8 ${errors.interest_rate ? 'input-error' : ''}`}
+                        placeholder="0.05"
+                        step="0.001"
+                        min="0"
+                        max="1"
+                      />
+                      <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">%</span>
+                    </div>
+                    {errors.interest_rate && (
+                      <p className="mt-1 text-sm text-red-600">{errors.interest_rate}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor="vacancy_rate" className="label">
+                      Vacancy Rate
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        id="vacancy_rate"
+                        value={formData.vacancy_rate}
+                        onChange={(e) => handleInputChange('vacancy_rate', Number(e.target.value))}
+                        className={`input pr-8 ${errors.vacancy_rate ? 'input-error' : ''}`}
+                        placeholder="0.05"
+                        step="0.001"
+                        min="0"
+                        max="1"
+                      />
+                      <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">%</span>
+                    </div>
+                    {errors.vacancy_rate && (
+                      <p className="mt-1 text-sm text-red-600">{errors.vacancy_rate}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor="expense_ratio" className="label">
+                      Expense Ratio
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        id="expense_ratio"
+                        value={formData.expense_ratio}
+                        onChange={(e) => handleInputChange('expense_ratio', Number(e.target.value))}
+                        className={`input pr-8 ${errors.expense_ratio ? 'input-error' : ''}`}
+                        placeholder="0.35"
+                        step="0.001"
+                        min="0"
+                        max="1"
+                      />
+                      <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">%</span>
+                    </div>
+                    {errors.expense_ratio && (
+                      <p className="mt-1 text-sm text-red-600">{errors.expense_ratio}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-            
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                  Valuation Name
-                </label>
-                <input
-                  type="text"
-                  name="name"
-                  id="name"
-                  required
-                  value={formData.name}
-                  onChange={handleChange}
-                  className="input mt-1"
-                  placeholder="e.g., Base Case Scenario"
-                />
+
+            {/* Submit Error */}
+            {errors.submit && (
+              <div className="card border-red-200 bg-red-50">
+                <p className="text-red-600">{errors.submit}</p>
               </div>
+            )}
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label htmlFor="purchase_price" className="block text-sm font-medium text-gray-700">
-                    Purchase Price ($)
-                  </label>
-                  <input
-                    type="number"
-                    name="purchase_price"
-                    id="purchase_price"
-                    value={formData.assumptions.purchase_price}
-                    onChange={handleChange}
-                    className="input mt-1"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="loan_amount" className="block text-sm font-medium text-gray-700">
-                    Loan Amount ($)
-                  </label>
-                  <input
-                    type="number"
-                    name="loan_amount"
-                    id="loan_amount"
-                    value={formData.assumptions.loan_amount}
-                    onChange={handleChange}
-                    className="input mt-1"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="exit_cap_rate" className="block text-sm font-medium text-gray-700">
-                    Exit Cap Rate (%)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    name="exit_cap_rate"
-                    id="exit_cap_rate"
-                    value={formData.assumptions.exit_cap_rate * 100}
-                    onChange={(e) => handleChange({
-                      ...e,
-                      target: { ...e.target, value: (parseFloat(e.target.value) / 100).toString() }
-                    })}
-                    className="input mt-1"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="hold_period" className="block text-sm font-medium text-gray-700">
-                    Hold Period (Years)
-                  </label>
-                  <input
-                    type="number"
-                    name="hold_period"
-                    id="hold_period"
-                    value={formData.assumptions.hold_period}
-                    onChange={handleChange}
-                    className="input mt-1"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="interest_rate" className="block text-sm font-medium text-gray-700">
-                    Interest Rate (%)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    name="interest_rate"
-                    id="interest_rate"
-                    value={(formData.assumptions.interest_rate || 0) * 100}
-                    onChange={(e) => handleChange({
-                      ...e,
-                      target: { ...e.target, value: (parseFloat(e.target.value) / 100).toString() }
-                    })}
-                    className="input mt-1"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="vacancy_rate" className="block text-sm font-medium text-gray-700">
-                    Vacancy Rate (%)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    name="vacancy_rate"
-                    id="vacancy_rate"
-                    value={(formData.assumptions.vacancy_rate || 0) * 100}
-                    onChange={(e) => handleChange({
-                      ...e,
-                      target: { ...e.target, value: (parseFloat(e.target.value) / 100).toString() }
-                    })}
-                    className="input mt-1"
-                  />
-                </div>
-              </div>
-
+            {/* Actions */}
+            <div className="flex justify-end space-x-4">
+              <Link
+                href={`/deals/${dealId}`}
+                className="btn btn-secondary"
+              >
+                Cancel
+              </Link>
               <button
-                type="submit"
+                onClick={handleRunValuation}
                 disabled={isRunning}
-                className="btn btn-primary w-full disabled:opacity-50"
+                className="btn btn-primary flex items-center"
               >
                 {isRunning ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Running Valuation...
+                    Running...
                   </>
                 ) : (
                   <>
@@ -264,65 +424,85 @@ export default function ValuationPage() {
                   </>
                 )}
               </button>
-            </form>
+            </div>
           </div>
 
-          {/* Valuation History */}
-          <div className="card">
-            <div className="flex items-center mb-4">
-              <History className="h-6 w-6 text-primary-600 mr-2" />
-              <h2 className="text-lg font-medium text-gray-900">Valuation History</h2>
-            </div>
-            
-            {valuationRuns && valuationRuns.length > 0 ? (
-              <div className="space-y-4">
-                {valuationRuns.map((run) => (
-                  <div key={run.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-medium text-gray-900">{run.name}</h3>
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        run.status === 'completed' 
-                          ? 'bg-green-100 text-green-800'
-                          : run.status === 'running'
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {run.status}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-500 mb-3">
-                      {new Date(run.created_at).toLocaleString()}
-                    </p>
-                    
-                    {run.status === 'completed' && (
-                      <div className="grid grid-cols-2 gap-4 text-sm">
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Previous Runs */}
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Previous Runs</h3>
+              {runsLoading ? (
+                <p className="text-gray-500">Loading...</p>
+              ) : valuationRuns && valuationRuns.length > 0 ? (
+                <div className="space-y-3">
+                  {valuationRuns.slice(0, 3).map((run) => (
+                    <div key={run.id} className="border border-gray-200 rounded-lg p-3">
+                      <div className="flex justify-between items-start">
                         <div>
-                          <span className="text-gray-500">IRR:</span>
-                          <span className="ml-2 font-medium">{(run.results.irr * 100).toFixed(1)}%</span>
+                          <h4 className="font-medium text-gray-900 text-sm">{run.name}</h4>
+                          <p className="text-xs text-gray-500">
+                            {new Date(run.created_at).toLocaleDateString()}
+                          </p>
                         </div>
-                        <div>
-                          <span className="text-gray-500">Equity Multiple:</span>
-                          <span className="ml-2 font-medium">{run.results.equity_multiple.toFixed(2)}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">DSCR:</span>
-                          <span className="ml-2 font-medium">{run.results.dscr.toFixed(2)}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">Cap Rate:</span>
-                          <span className="ml-2 font-medium">{(run.results.cap_rate * 100).toFixed(1)}%</span>
-                        </div>
+                        <span className={`badge ${
+                          run.status === 'completed' ? 'badge-success' : 
+                          run.status === 'running' ? 'badge-warning' : 
+                          'badge-gray'
+                        }`}>
+                          {run.status}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {run.status === 'completed' && run.results && (
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <span className="text-gray-500">IRR:</span>
+                            <span className="font-medium ml-1">
+                              {(run.results.irr * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">DSCR:</span>
+                            <span className="font-medium ml-1">
+                              {run.results.dscr.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm">No previous runs</p>
+              )}
+            </div>
+
+            {/* Quick Scenarios */}
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Scenarios</h3>
+              <div className="space-y-2">
+                <button
+                  onClick={() => setFormData(prev => ({ ...prev, name: 'Optimistic', exit_cap_rate: 0.045, vacancy_rate: 0.03 }))}
+                  className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded"
+                >
+                  Optimistic Case
+                </button>
+                <button
+                  onClick={() => setFormData(prev => ({ ...prev, name: 'Conservative', exit_cap_rate: 0.055, vacancy_rate: 0.07 }))}
+                  className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded"
+                >
+                  Conservative Case
+                </button>
+                <button
+                  onClick={() => setFormData(prev => ({ ...prev, name: 'Stress Test', exit_cap_rate: 0.06, vacancy_rate: 0.1, expense_ratio: 0.4 }))}
+                  className="w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-50 rounded"
+                >
+                  Stress Test
+                </button>
               </div>
-            ) : (
-              <p className="text-gray-500">No valuation runs yet. Run your first valuation to see results.</p>
-            )}
+            </div>
           </div>
         </div>
-      </main>
     </div>
   )
 }

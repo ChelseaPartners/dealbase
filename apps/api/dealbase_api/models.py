@@ -4,13 +4,14 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import JSON
+from sqlalchemy import JSON, Column
 
 
 class DealBase(SQLModel):
     """Base deal model."""
 
     name: str
+    slug: str  # URL-friendly identifier
     property_type: str
     address: str
     city: str
@@ -18,6 +19,12 @@ class DealBase(SQLModel):
     zip_code: str
     description: Optional[str] = None
     status: str = "draft"  # draft, active, completed, archived
+    # Multifamily-specific fields
+    msa: Optional[str] = None  # Metropolitan Statistical Area
+    year_built: Optional[int] = None
+    unit_count: Optional[int] = None  # Number of units
+    nsf: Optional[int] = None  # Net Square Feet (Average Unit SF)
+    deal_tags: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))  # Array of deal tags
 
 
 class Deal(DealBase, table=True):

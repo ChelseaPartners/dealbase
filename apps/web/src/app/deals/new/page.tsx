@@ -2,219 +2,391 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
-import { ArrowLeft, Building2 } from 'lucide-react'
-import { DealCreate } from '@dealbase/shared'
+import { ArrowLeft, Building2, Save, X, CheckCircle } from 'lucide-react'
+import { AddressAutocomplete } from '@/components/AddressAutocomplete'
+
+interface DealFormData {
+  name: string
+  property_type: string
+  address: string
+  city: string
+  state: string
+  zip_code: string
+  description: string
+}
+
+const propertyTypes = [
+  'Multifamily'
+]
+
+const states = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
+  'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
+  'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+  'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
+  'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
+]
 
 export default function NewDealPage() {
   const router = useRouter()
-  const [formData, setFormData] = useState<DealCreate>({
+  const queryClient = useQueryClient()
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [autoFilledFields, setAutoFilledFields] = useState<Set<string>>(new Set())
+  
+  const [formData, setFormData] = useState<DealFormData>({
     name: '',
-    property_type: '',
+    property_type: 'Multifamily',
     address: '',
     city: '',
     state: '',
     zip_code: '',
-    description: '',
+    description: ''
   })
-  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSubmitting(true)
-
-    try {
+  // Create deal mutation
+  const createDealMutation = useMutation({
+    mutationFn: async (dealData: DealFormData) => {
       const response = await fetch('/api/deals', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(dealData),
       })
-
+      
       if (!response.ok) {
-        throw new Error('Failed to create deal')
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to create deal')
       }
-
-      const deal = await response.json()
-      router.push(`/deals/${deal.id}`)
-    } catch (error) {
+      
+      return response.json()
+    },
+    onSuccess: (deal) => {
+      // Invalidate and refetch the deals query to update the list
+      queryClient.invalidateQueries({ queryKey: ['deals'] })
+      
+      // Show success feedback before redirect
+      setErrors({ submit: 'Deal created successfully! Redirecting...' })
+      
+      // Small delay to show success message
+      setTimeout(() => {
+        router.push(`/deals/${deal.id}`)
+      }, 1000)
+    },
+    onError: (error) => {
       console.error('Error creating deal:', error)
-      alert('Failed to create deal. Please try again.')
-    } finally {
-      setIsSubmitting(false)
+      setErrors({ submit: error.message })
+    }
+  })
+
+  const handleInputChange = (field: keyof DealFormData, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }))
+    // Clear error when user starts typing
+    if (errors[field]) {
+      setErrors(prev => ({ ...prev, [field]: '' }))
     }
   }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
+  const handleAddressSelect = (suggestion: { address: string; city: string; state: string; zip_code: string }) => {
+    setFormData(prev => ({
+      ...prev,
+      address: suggestion.address,
+      city: suggestion.city,
+      state: suggestion.state,
+      zip_code: suggestion.zip_code
+    }))
+    // Mark fields as auto-filled
+    setAutoFilledFields(new Set(['city', 'state', 'zip_code']))
+    // Clear any location-related errors
+    setErrors(prev => ({
+      ...prev,
+      address: '',
+      city: '',
+      state: '',
+      zip_code: ''
+    }))
+  }
+
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {}
+    
+    if (!formData.name.trim()) {
+      newErrors.name = 'Deal name is required'
+    }
+    
+    // Property type is always Multifamily, no validation needed
+    
+    if (!formData.address.trim()) {
+      newErrors.address = 'Address is required'
+    }
+    
+    if (!formData.city.trim()) {
+      newErrors.city = 'City is required'
+    }
+    
+    if (!formData.state) {
+      newErrors.state = 'State is required'
+    }
+    
+    if (!formData.zip_code.trim()) {
+      newErrors.zip_code = 'ZIP code is required'
+    } else if (!/^\d{5}(-\d{4})?$/.test(formData.zip_code)) {
+      newErrors.zip_code = 'Please enter a valid ZIP code'
+    }
+    
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!validateForm()) {
+      // Scroll to first error
+      const firstError = Object.keys(errors)[0]
+      if (firstError) {
+        const element = document.getElementById(firstError)
+        element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        element?.focus()
+      }
+      return
+    }
+    
+    setErrors({}) // Clear any previous errors
+    
+    // Use the mutation to create the deal
+    createDealMutation.mutate(formData)
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <Building2 className="h-8 w-8 text-primary-600" />
-              <h1 className="ml-2 text-xl font-bold text-gray-900">DealBase</h1>
-            </div>
-            <nav className="flex space-x-8">
-              <Link href="/deals" className="text-gray-700 hover:text-primary-600">
-                Deals
-              </Link>
-              <Link href="/intake" className="text-gray-700 hover:text-primary-600">
-                Intake
-              </Link>
-              <Link href="/valuation" className="text-gray-700 hover:text-primary-600">
-                Valuation
-              </Link>
-            </nav>
-          </div>
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="mb-8">
+        <Link
+          href="/deals"
+          className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
+        >
+          <ArrowLeft className="h-4 w-4 mr-1" />
+          Back to Deals
+        </Link>
+        <div className="mt-4">
+          <h1 className="text-3xl font-bold text-gray-900">Create New Deal</h1>
+          <p className="mt-2 text-gray-600">Set up a new commercial real estate deal for analysis</p>
         </div>
-      </header>
+      </div>
 
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <Link
-            href="/deals"
-            className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
-          >
-            <ArrowLeft className="h-4 w-4 mr-1" />
-            Back to Deals
-          </Link>
-          <h1 className="mt-4 text-3xl font-bold text-gray-900">Create New Deal</h1>
-          <p className="mt-2 text-gray-600">Enter the basic information for your commercial real estate deal.</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-8" noValidate>
+          {/* Basic Information */}
           <div className="card">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Deal Information</h2>
-            
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">Basic Information</h2>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-              <div>
-                <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+              <div className="sm:col-span-2">
+                <label htmlFor="name" className="label">
                   Deal Name *
                 </label>
                 <input
                   type="text"
-                  name="name"
                   id="name"
-                  required
                   value={formData.name}
-                  onChange={handleChange}
-                  className="input mt-1"
+                  onChange={(e) => handleInputChange('name', e.target.value)}
+                  className={`input ${errors.name ? 'input-error' : ''}`}
                   placeholder="e.g., Downtown Office Tower"
+                  autoComplete="off"
+                  autoFocus
                 />
+                {errors.name && (
+                  <p className="mt-1 text-sm text-red-600">{errors.name}</p>
+                )}
               </div>
 
               <div>
-                <label htmlFor="property_type" className="block text-sm font-medium text-gray-700">
-                  Property Type *
+                <label htmlFor="property_type" className="label">
+                  Property Type
                 </label>
                 <select
-                  name="property_type"
                   id="property_type"
-                  required
                   value={formData.property_type}
-                  onChange={handleChange}
-                  className="input mt-1"
+                  disabled
+                  className="input bg-gray-100 cursor-not-allowed"
                 >
-                  <option value="">Select property type</option>
-                  <option value="Office">Office</option>
-                  <option value="Retail">Retail</option>
-                  <option value="Industrial">Industrial</option>
-                  <option value="Multifamily">Multifamily</option>
-                  <option value="Hospitality">Hospitality</option>
-                  <option value="Mixed Use">Mixed Use</option>
+                  {propertyTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
                 </select>
+                <p className="mt-1 text-sm text-gray-500">Currently focused on multifamily properties</p>
+              </div>
+
+            </div>
+          </div>
+
+          {/* Location Information */}
+          <div className="card">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">Location Information</h2>
+            <div className="space-y-6">
+              <div>
+                <label htmlFor="address" className="label">
+                  Street Address *
+                </label>
+                <AddressAutocomplete
+                  value={formData.address}
+                  onChange={(value) => handleInputChange('address', value)}
+                  onAddressSelect={handleAddressSelect}
+                  error={errors.address}
+                  placeholder="123 Main Street"
+                  id="address"
+                />
+                {errors.address && (
+                  <p className="mt-1 text-sm text-red-600">{errors.address}</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+                <div>
+                  <label htmlFor="city" className="label">
+                    City *
+                    {autoFilledFields.has('city') && (
+                      <span className="ml-2 text-xs text-green-600 font-normal">(auto-filled)</span>
+                    )}
+                  </label>
+                  <input
+                    type="text"
+                    id="city"
+                    value={formData.city}
+                    onChange={(e) => {
+                      handleInputChange('city', e.target.value)
+                      // Remove from auto-filled when user manually changes
+                      if (autoFilledFields.has('city')) {
+                        setAutoFilledFields(prev => {
+                          const newSet = new Set(prev)
+                          newSet.delete('city')
+                          return newSet
+                        })
+                      }
+                    }}
+                    className={`input ${errors.city ? 'input-error' : ''} ${
+                      autoFilledFields.has('city') ? 'bg-green-50 border-green-300' : ''
+                    }`}
+                    placeholder="New York"
+                  />
+                  {errors.city && (
+                    <p className="mt-1 text-sm text-red-600">{errors.city}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label htmlFor="state" className="label">
+                    State *
+                    {autoFilledFields.has('state') && (
+                      <span className="ml-2 text-xs text-green-600 font-normal">(auto-filled)</span>
+                    )}
+                  </label>
+                  <select
+                    id="state"
+                    value={formData.state}
+                    onChange={(e) => {
+                      handleInputChange('state', e.target.value)
+                      // Remove from auto-filled when user manually changes
+                      if (autoFilledFields.has('state')) {
+                        setAutoFilledFields(prev => {
+                          const newSet = new Set(prev)
+                          newSet.delete('state')
+                          return newSet
+                        })
+                      }
+                    }}
+                    className={`input ${errors.state ? 'input-error' : ''} ${
+                      autoFilledFields.has('state') ? 'bg-green-50 border-green-300' : ''
+                    }`}
+                  >
+                    <option value="">Select state</option>
+                    {states.map((state) => (
+                      <option key={state} value={state}>
+                        {state}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.state && (
+                    <p className="mt-1 text-sm text-red-600">{errors.state}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label htmlFor="zip_code" className="label">
+                    ZIP Code *
+                    {autoFilledFields.has('zip_code') && (
+                      <span className="ml-2 text-xs text-green-600 font-normal">(auto-filled)</span>
+                    )}
+                  </label>
+                  <input
+                    type="text"
+                    id="zip_code"
+                    value={formData.zip_code}
+                    onChange={(e) => {
+                      handleInputChange('zip_code', e.target.value)
+                      // Remove from auto-filled when user manually changes
+                      if (autoFilledFields.has('zip_code')) {
+                        setAutoFilledFields(prev => {
+                          const newSet = new Set(prev)
+                          newSet.delete('zip_code')
+                          return newSet
+                        })
+                      }
+                    }}
+                    className={`input ${errors.zip_code ? 'input-error' : ''} ${
+                      autoFilledFields.has('zip_code') ? 'bg-green-50 border-green-300' : ''
+                    }`}
+                    placeholder="12345"
+                  />
+                  {errors.zip_code && (
+                    <p className="mt-1 text-sm text-red-600">{errors.zip_code}</p>
+                  )}
+                </div>
               </div>
             </div>
+          </div>
 
-            <div className="mt-6">
-              <label htmlFor="address" className="block text-sm font-medium text-gray-700">
-                Address *
-              </label>
-              <input
-                type="text"
-                name="address"
-                id="address"
-                required
-                value={formData.address}
-                onChange={handleChange}
-                className="input mt-1"
-                placeholder="123 Main Street"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-3 mt-6">
-              <div>
-                <label htmlFor="city" className="block text-sm font-medium text-gray-700">
-                  City *
-                </label>
-                <input
-                  type="text"
-                  name="city"
-                  id="city"
-                  required
-                  value={formData.city}
-                  onChange={handleChange}
-                  className="input mt-1"
-                  placeholder="New York"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="state" className="block text-sm font-medium text-gray-700">
-                  State *
-                </label>
-                <input
-                  type="text"
-                  name="state"
-                  id="state"
-                  required
-                  value={formData.state}
-                  onChange={handleChange}
-                  className="input mt-1"
-                  placeholder="NY"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="zip_code" className="block text-sm font-medium text-gray-700">
-                  ZIP Code *
-                </label>
-                <input
-                  type="text"
-                  name="zip_code"
-                  id="zip_code"
-                  required
-                  value={formData.zip_code}
-                  onChange={handleChange}
-                  className="input mt-1"
-                  placeholder="10001"
-                />
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+          {/* Additional Information */}
+          <div className="card">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">Additional Information</h2>
+            <div>
+              <label htmlFor="description" className="label">
                 Description
               </label>
               <textarea
-                name="description"
                 id="description"
-                rows={3}
+                rows={4}
                 value={formData.description}
-                onChange={handleChange}
-                className="input mt-1"
-                placeholder="Additional details about the deal..."
+                onChange={(e) => handleInputChange('description', e.target.value)}
+                className="input"
+                placeholder="Optional description of the deal, key features, or notes..."
               />
             </div>
           </div>
 
+          {/* Submit Status */}
+          {errors.submit && (
+            <div className={`card ${
+              errors.submit.includes('successfully') 
+                ? 'border-green-200 bg-green-50' 
+                : 'border-red-200 bg-red-50'
+            }`}>
+              <div className="flex items-center">
+                {errors.submit.includes('successfully') ? (
+                  <CheckCircle className="h-5 w-5 text-green-500 mr-2" />
+                ) : (
+                  <X className="h-5 w-5 text-red-500 mr-2" />
+                )}
+                <p className={errors.submit.includes('successfully') ? 'text-green-600' : 'text-red-600'}>
+                  {errors.submit}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
           <div className="flex justify-end space-x-4">
             <Link
               href="/deals"
@@ -224,14 +396,27 @@ export default function NewDealPage() {
             </Link>
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="btn btn-primary disabled:opacity-50"
+              disabled={createDealMutation.isPending}
+              className={`btn btn-primary flex items-center transition-all duration-200 ${
+                createDealMutation.isPending 
+                  ? 'opacity-75 cursor-not-allowed' 
+                  : 'hover:scale-105 active:scale-95'
+              }`}
             >
-              {isSubmitting ? 'Creating...' : 'Create Deal'}
+              {createDealMutation.isPending ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Creating Deal...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Create Deal
+                </>
+              )}
             </button>
           </div>
-        </form>
-      </main>
+      </form>
     </div>
   )
 }

@@ -1,66 +1,30 @@
-'use client'
-
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, Building2, Eye } from 'lucide-react'
 
-export default function DealsPage() {
-  const router = useRouter()
-  const [deals, setDeals] = useState<any[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  // Fetch deals from API with timeout
-  useEffect(() => {
-    const fetchDeals = async () => {
-      try {
-        setIsLoading(true)
-        
-        // Create a timeout promise
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Request timeout')), 3000)
-        })
-        
-        // Race between fetch and timeout
-        const response = await Promise.race([
-          fetch('/api/deals'),
-          timeoutPromise
-        ]) as Response
-        
-        if (!response.ok) {
-          throw new Error('Failed to fetch deals')
-        }
-        const data = await response.json()
-        console.log('Fetched deals:', data.length)
-        setDeals(data)
-      } catch (err) {
-        console.error('Error fetching deals:', err)
-        // Fallback to direct backend fetch
-        try {
-          const directResponse = await fetch('http://localhost:8000/api/deals')
-          if (directResponse.ok) {
-            const data = await directResponse.json()
-            console.log('Direct fetch successful:', data.length)
-            setDeals(data)
-          } else {
-            throw new Error('Direct fetch failed')
-          }
-        } catch (directErr) {
-          console.error('Direct fetch also failed:', directErr)
-          setError('Unable to load deals. Please try again later.')
-        }
-      } finally {
-        setIsLoading(false)
-      }
+// Server-side data fetching
+async function getDeals() {
+  try {
+    const response = await fetch('http://localhost:8000/api/deals', {
+      cache: 'no-store', // Always fetch fresh data
+    })
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
     }
-
-    fetchDeals()
-  }, [])
-
-  const handleViewDeal = (dealId: number) => {
-    router.push(`/deals/${dealId}`)
+    
+    return await response.json()
+  } catch (error) {
+    console.error('Error fetching deals:', error)
+    return []
   }
+}
+
+export default async function DealsPage() {
+  const deals = await getDeals()
+  const isLoading = false
+  const error = null
+
+  // Note: This is now a server component, so we'll use Link components for navigation
 
   if (isLoading) {
     return (
@@ -194,16 +158,16 @@ export default function DealsPage() {
                   <td className="px-6 py-5 whitespace-nowrap">
                     <span className="text-sm text-gray-500">System</span>
                   </td>
-                  <td className="px-6 py-5 whitespace-nowrap text-center">
-                    <button
-                      onClick={() => handleViewDeal(deal.id)}
-                      className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 shadow-sm hover:shadow-md"
-                      aria-label={`View details for ${deal.name}`}
-                    >
-                      <Eye className="h-4 w-4 mr-1" />
-                      View
-                    </button>
-                  </td>
+                      <td className="px-6 py-5 whitespace-nowrap text-center">
+                        <Link
+                          href={`/deals/${deal.id}`}
+                          className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 shadow-sm hover:shadow-md"
+                          aria-label={`View details for ${deal.name}`}
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View
+                        </Link>
+                      </td>
                 </tr>
               ))}
             </tbody>
