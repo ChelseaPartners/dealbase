@@ -1,4 +1,5 @@
 repos:
+  # Python backend checks
   - repo: https://github.com/psf/black
     rev: 24.8.0
     hooks:
@@ -16,6 +17,8 @@ repos:
     hooks:
       - id: mypy
         files: ^apps/api/
+  
+  # Frontend checks
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v3.3.3
     hooks:
@@ -26,3 +29,21 @@ repos:
     hooks:
       - id: eslint
         files: ^apps/web/|^packages/shared/
+  
+  # TypeScript type checking
+  - repo: local
+    hooks:
+      - id: typescript-check
+        name: TypeScript Check
+        entry: pnpm typecheck
+        language: system
+        pass_filenames: false
+        always_run: true
+        files: ^apps/web/|^packages/shared/
+  
+  # Commit message format
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.13.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]

@@ -1,0 +1,17 @@
+# <type>(<scope>): <subject>
+#
+# <body>
+#
+# <footer>
+
+# Types: feat, fix, docs, style, refactor, test, chore
+# Scope: web, api, shared, config, etc.
+# Subject: imperative mood, lowercase, no period
+# Body: explain what and why, not how
+# Footer: breaking changes, issues closed
+
+# Examples:
+# feat(web): add deal creation form
+# fix(api): resolve database connection timeout
+# docs: update contributing guidelines
+# chore: update dependencies

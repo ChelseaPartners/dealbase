@@ -1,0 +1,36 @@
+name: Setup Branch Protection
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to protect'
+        required: true
+        default: 'main'
+
+jobs:
+  setup-protection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup branch protection
+        run: |
+          echo "Branch protection setup for ${{ github.event.inputs.branch }}"
+          echo "This workflow would configure:"
+          echo "- Require PR reviews before merging"
+          echo "- Require status checks to pass before merging"
+          echo "- Require branches to be up to date before merging"
+          echo "- Restrict pushes to matching branches"
+          echo "- Require linear history"
+          echo ""
+          echo "To set up branch protection:"
+          echo "1. Go to Settings > Branches"
+          echo "2. Add rule for ${{ github.event.inputs.branch }}"
+          echo "3. Enable: Require a pull request before merging"
+          echo "4. Enable: Require status checks to pass before merging"
+          echo "5. Select: basic-check, test-frontend, test-backend"
+          echo "6. Enable: Require branches to be up to date before merging"
+          echo "7. Enable: Restrict pushes to matching branches"
+          echo "8. Enable: Require linear history"
