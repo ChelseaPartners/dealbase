@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import '../styles/fallback.css' // CSS fallback for development stability
 import { Providers } from './providers'
 import GlobalHeader from '@/components/GlobalHeader'
 

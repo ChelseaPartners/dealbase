@@ -1,28 +1,15 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
-import Link from 'next/link'
-import { ArrowLeft, Building2, Upload, FileText, CheckCircle, AlertCircle, Download, Trash2 } from 'lucide-react'
-import { Deal } from '@dealbase/shared'
-
-async function fetchDeal(id: string): Promise<Deal> {
-  const response = await fetch(`/api/deals/${id}`)
-  if (!response.ok) {
-    throw new Error('Failed to fetch deal')
-  }
-  return response.json()
-}
+import { Upload, FileText, CheckCircle, AlertCircle, Download, Trash2, X } from 'lucide-react'
 
 interface FileUploadProps {
   type: 't12' | 'rentroll'
-  dealId: string
   onUpload: (file: File) => Promise<void>
   isUploading: boolean
 }
 
-function FileUpload({ type, dealId, onUpload, isUploading }: FileUploadProps) {
+function FileUpload({ type, onUpload, isUploading }: FileUploadProps) {
   const [dragActive, setDragActive] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
@@ -43,7 +30,7 @@ function FileUpload({ type, dealId, onUpload, isUploading }: FileUploadProps) {
     
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0]
-      if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+      if (file.type === 'text/csv' || file.name.endsWith('.csv') || file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
         setSelectedFile(file)
       }
     }
@@ -69,7 +56,7 @@ function FileUpload({ type, dealId, onUpload, isUploading }: FileUploadProps) {
     : 'Upload unit-level rent roll data (units, rents, lease terms)'
 
   return (
-    <div className="card">
+    <div className="bg-white rounded-lg border border-gray-200 p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
@@ -79,7 +66,7 @@ function FileUpload({ type, dealId, onUpload, isUploading }: FileUploadProps) {
       </div>
 
       <div
-        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+        className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
           dragActive
             ? 'border-primary-400 bg-primary-50'
             : selectedFile
@@ -93,7 +80,7 @@ function FileUpload({ type, dealId, onUpload, isUploading }: FileUploadProps) {
       >
         {selectedFile ? (
           <div className="space-y-4">
-            <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
+            <CheckCircle className="h-10 w-10 text-green-500 mx-auto" />
             <div>
               <p className="text-sm font-medium text-gray-900">{selectedFile.name}</p>
               <p className="text-sm text-gray-500">
@@ -129,21 +116,21 @@ function FileUpload({ type, dealId, onUpload, isUploading }: FileUploadProps) {
           </div>
         ) : (
           <div className="space-y-4">
-            <Upload className="h-12 w-12 text-gray-400 mx-auto" />
+            <Upload className="h-10 w-10 text-gray-400 mx-auto" />
             <div>
               <p className="text-sm font-medium text-gray-900">
-                Drop your CSV file here, or{' '}
+                Drop your file here, or{' '}
                 <label className="text-primary-600 hover:text-primary-500 cursor-pointer">
                   browse
                   <input
                     type="file"
-                    accept=".csv"
+                    accept=".csv,.xlsx,.xls"
                     onChange={handleFileSelect}
                     className="hidden"
                   />
                 </label>
               </p>
-              <p className="text-sm text-gray-500">CSV files only, max 10MB</p>
+              <p className="text-sm text-gray-500">CSV, XLSX files supported, max 10MB</p>
             </div>
           </div>
         )}
@@ -163,16 +150,14 @@ function FileUpload({ type, dealId, onUpload, isUploading }: FileUploadProps) {
   )
 }
 
-export default function IntakePage() {
-  const params = useParams()
-  const router = useRouter()
-  const dealId = params.id as string
+interface UploadModalProps {
+  isOpen: boolean
+  onClose: () => void
+  dealId: string
+  dealName: string
+}
 
-  const { data: deal, isLoading, error } = useQuery({
-    queryKey: ['deal', dealId],
-    queryFn: () => fetchDeal(dealId),
-  })
-
+export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalProps) {
   const [isUploadingT12, setIsUploadingT12] = useState(false)
   const [isUploadingRentRoll, setIsUploadingRentRoll] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<Record<string, { success: boolean; message: string }>>({})
@@ -202,9 +187,10 @@ export default function IntakePage() {
         [type]: { success: true, message: 'Upload successful!' } 
       }))
 
-      // Redirect to deal detail page after successful upload
+      // Close modal after successful upload
       setTimeout(() => {
-        router.push(`/deals/${dealId}`)
+        onClose()
+        setUploadStatus({})
       }, 1500)
 
     } catch (error) {
@@ -218,53 +204,32 @@ export default function IntakePage() {
     }
   }
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading deal...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error || !deal) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-red-600">Error loading deal: {error?.message}</p>
-          <Link href="/deals" className="mt-4 btn btn-primary">
-            Back to Deals
-          </Link>
-        </div>
-      </div>
-    )
-  }
+  if (!isOpen) return null
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <Link
-            href={`/deals/${dealId}`}
-            className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
-          >
-            <ArrowLeft className="h-4 w-4 mr-1" />
-            Back to Deal
-          </Link>
-          <div className="mt-4">
-            <h1 className="text-3xl font-bold text-gray-900">Data Intake</h1>
-            <p className="mt-2 text-gray-600">
-              Upload financial data for <span className="font-medium">{deal.name}</span>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Upload Data</h2>
+            <p className="text-sm text-gray-600">
+              Upload financial data for <span className="font-medium">{dealName}</span>
             </p>
           </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <X className="h-6 w-6" />
+          </button>
         </div>
 
         {/* Upload Status Messages */}
         {Object.entries(uploadStatus).map(([type, status]) => (
           <div
             key={type}
-            className={`mb-4 p-4 rounded-lg flex items-center ${
+            className={`mx-6 mt-4 p-4 rounded-lg flex items-center ${
               status.success
                 ? 'bg-green-50 border border-green-200'
                 : 'bg-red-50 border border-red-200'
@@ -284,46 +249,57 @@ export default function IntakePage() {
         ))}
 
         {/* Upload Sections */}
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-          <FileUpload
-            type="t12"
-            dealId={dealId}
-            onUpload={(file) => handleFileUpload('t12', file)}
-            isUploading={isUploadingT12}
-          />
-          
-          <FileUpload
-            type="rentroll"
-            dealId={dealId}
-            onUpload={(file) => handleFileUpload('rentroll', file)}
-            isUploading={isUploadingRentRoll}
-          />
-        </div>
+        <div className="p-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <FileUpload
+              type="t12"
+              onUpload={(file) => handleFileUpload('t12', file)}
+              isUploading={isUploadingT12}
+            />
+            
+            <FileUpload
+              type="rentroll"
+              onUpload={(file) => handleFileUpload('rentroll', file)}
+              isUploading={isUploadingRentRoll}
+            />
+          </div>
 
-        {/* Instructions */}
-        <div className="mt-8 card">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Requirements</h3>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">T-12 Financial Data</h4>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>• 12 months of trailing data</li>
-                <li>• Gross rent, other income, operating expenses</li>
-                <li>• Net operating income (NOI)</li>
-                <li>• CSV format with month/year columns</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">Rent Roll Data</h4>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>• Unit-level rent information</li>
-                <li>• Unit numbers, types, square footage</li>
-                <li>• Current rent and market rent</li>
-                <li>• Lease start/end dates</li>
-              </ul>
+          {/* Instructions */}
+          <div className="mt-6 bg-gray-50 rounded-lg p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Requirements</h3>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              <div>
+                <h4 className="font-medium text-gray-900 mb-2">T-12 Financial Data</h4>
+                <ul className="text-sm text-gray-600 space-y-1">
+                  <li>• 12 months of trailing data</li>
+                  <li>• Gross rent, other income, operating expenses</li>
+                  <li>• Net operating income (NOI)</li>
+                  <li>• CSV/XLSX format with month/year columns</li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="font-medium text-gray-900 mb-2">Rent Roll Data</h4>
+                <ul className="text-sm text-gray-600 space-y-1">
+                  <li>• Unit-level rent information</li>
+                  <li>• Unit numbers, types, square footage</li>
+                  <li>• Current rent and market rent</li>
+                  <li>• Lease start/end dates</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
+
+        {/* Footer */}
+        <div className="flex justify-end p-6 border-t border-gray-200">
+          <button
+            onClick={onClose}
+            className="btn btn-secondary"
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
