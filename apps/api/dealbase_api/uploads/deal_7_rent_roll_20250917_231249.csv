@@ -1,0 +1,6 @@
+Unit,floorplan,Type,SqFt,Beds,Baths,Rent,Status
+101,A1G,1BR,800,1,1,1200,occupied
+102,A1P,1BR,850,1,1,1250,occupied
+103,B2Q,2BR,1200,2,2,1800,vacant
+104,A1G,1BR,800,1,1,1200,occupied
+105,B2Q,2BR,1200,2,2,1800,occupied

@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
-import { ArrowLeft, AlertCircle } from 'lucide-react'
+import { ArrowLeft, AlertCircle, ChevronDown, ChevronUp, Download, RefreshCw } from 'lucide-react'
 import { UnitMixVisualization } from '@/components/UnitMixVisualization'
 import { UnitMixSourceSection } from '@/components/UnitMixSourceSection'
+import { RentRollTable } from '@/components/RentRollTable'
 import { UploadModal } from '@/components/UploadModal'
 import { ReLinkRentRollModal } from '@/components/ReLinkRentRollModal'
 import { UploadRentRollModal } from '@/components/UploadRentRollModal'
@@ -56,9 +57,10 @@ interface RentRoll {
   is_normalized: boolean
 }
 
-async function fetchUnitMixData(dealId: string): Promise<UnitMixResponse> {
+async function fetchUnitMixData(dealId: string, groupBy: 'unit_type' | 'square_feet' | 'unit_label' = 'square_feet'): Promise<UnitMixResponse> {
   // Bypass Next.js API route and call backend directly
-  const response = await fetch(`http://localhost:8000/api/deals/${dealId}/unit-mix`)
+  const timestamp = new Date().getTime()
+  const response = await fetch(`http://localhost:8000/api/deals/${dealId}/unit-mix?group_by=${groupBy}&t=${timestamp}`)
   if (!response.ok) {
     throw new Error('Failed to fetch unit mix data')
   }
@@ -85,6 +87,8 @@ export default function UnitMixPage() {
   const [isLinking, setIsLinking] = useState(false)
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [showRentRollTable, setShowRentRollTable] = useState(false)
+  const [groupBy, setGroupBy] = useState<'unit_type' | 'square_feet' | 'unit_label'>('square_feet')
 
   // Fetch deal by slug to get the ID
   useEffect(() => {
@@ -111,8 +115,8 @@ export default function UnitMixPage() {
     isLoading: unitMixLoading, 
     error: unitMixError 
   } = useQuery({
-    queryKey: ['unit-mix', dealId],
-    queryFn: () => fetchUnitMixData(dealId!),
+    queryKey: ['unit-mix', dealId, groupBy],
+    queryFn: () => fetchUnitMixData(dealId!, groupBy),
     enabled: !!dealId
   })
 
@@ -242,6 +246,10 @@ export default function UnitMixPage() {
     }
   }
 
+  const handleGroupByChange = (newGroupBy: 'unit_type' | 'square_feet' | 'unit_label') => {
+    setGroupBy(newGroupBy)
+  }
+
 
   const handleEditRow = (rowId: number) => {
     // Implement row editing logic
@@ -317,7 +325,7 @@ export default function UnitMixPage() {
         <div className="mt-4">
           <h1 className="text-3xl font-bold text-gray-900">Unit Mix</h1>
           <p className="mt-2 text-gray-600">
-            Combined unit mix visualization and dataset management
+            Unit mix visualization and analysis
           </p>
         </div>
       </div>
@@ -336,8 +344,11 @@ export default function UnitMixPage() {
           isLinked={isLinked}
           onEditRow={!isLinked ? handleEditRow : undefined}
           onDeleteRow={!isLinked ? handleDeleteRow : undefined}
+          groupBy={groupBy}
+          onGroupByChange={handleGroupByChange}
         />
       </div>
+
 
       {/* Unit Mix Source Section */}
       <div className="mb-8">
@@ -357,10 +368,66 @@ export default function UnitMixPage() {
           onSelectRentRoll={handleSelectRentRoll}
           showRentRollModal={showRentRollModal}
           onCloseRentRollModal={() => setShowRentRollModal(false)}
-          normalizedRentRollData={rentRollData?.units || []}
-          totalRentRollRecords={rentRollData?.total_units || 0}
         />
       </div>
+
+      {/* Rent Roll Data Section - Collapsible */}
+      {isLinked && rentRollData && rentRollData.units && rentRollData.units.length > 0 && (
+        <div className="mb-8">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Rent Roll Data</h3>
+                  <p className="text-sm text-gray-500">
+                    Unit-level rent roll data ({rentRollData.total_units} units)
+                  </p>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <button
+                    onClick={() => setShowRentRollTable(!showRentRollTable)}
+                    className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    {showRentRollTable ? (
+                      <>
+                        <ChevronUp className="h-4 w-4 mr-1" />
+                        Hide Details
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="h-4 w-4 mr-1" />
+                        Show Details
+                      </>
+                    )}
+                  </button>
+                  <button className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+                    <Download className="h-4 w-4 mr-1" />
+                    Export CSV
+                  </button>
+                  <button 
+                    onClick={() => queryClient.invalidateQueries({ queryKey: ['rentroll', dealId] })}
+                    className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-1" />
+                    Refresh
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Collapsible Rent Roll Table */}
+            {showRentRollTable && (
+              <div className="border-t border-gray-200">
+                <RentRollTable 
+                  units={rentRollData.units}
+                  showDetails={false}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Modals */}
       <ReLinkRentRollModal

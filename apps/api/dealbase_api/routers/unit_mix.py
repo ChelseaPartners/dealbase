@@ -92,7 +92,7 @@ def derive_unit_mix_from_nrr(deal_id: int, session: Session, rent_roll_name: Opt
     for unit_type, units in units_by_type.items():
         # Calculate aggregated metrics
         total_units = len(units)
-        occupied_units = len([u for u in units if u.lease_status == "occupied"])
+        occupied_units = len([u for u in units if u.lease_status.lower() == "occupied"])
         vacant_units = total_units - occupied_units
         
         # Calculate averages
@@ -157,9 +157,294 @@ def derive_unit_mix_from_nrr(deal_id: int, session: Session, rent_roll_name: Opt
     return unit_mix_rows
 
 
+def get_unit_mix_by_floor_plan(deal_id: int, session: Session) -> UnitMixResponse:
+    """Get unit mix data grouped by square footage and unit label (floor plan)."""
+    # Get normalized rent roll data
+    rent_roll_data = session.exec(
+        select(RentRollNormalized).where(RentRollNormalized.deal_id == deal_id)
+    ).all()
+    
+    if not rent_roll_data:
+        return UnitMixResponse(
+            deal_id=deal_id,
+            provenance="MANUAL",
+            is_linked_to_nrr=False,
+            unit_mix=[],
+            totals={
+                "total_units": 0,
+                "total_occupied": 0,
+                "total_actual_rent": 0.0,
+                "total_market_rent": 0.0
+            }
+        )
+    
+    # Group units by (square footage, unit label)
+    units_by_floor_plan = {}
+    for unit in rent_roll_data:
+        if unit.square_feet is not None:
+            # Use unit_label if available, otherwise use "—" for blank
+            unit_label = unit.unit_label.strip() if unit.unit_label and unit.unit_label.strip() else "—"
+            floor_plan_key = (unit.square_feet, unit_label)
+            
+            if floor_plan_key not in units_by_floor_plan:
+                units_by_floor_plan[floor_plan_key] = []
+            units_by_floor_plan[floor_plan_key].append(unit)
+    
+    # Sort by square footage ascending, then by unit label A→Z, blanks last
+    sorted_floor_plans = sorted(units_by_floor_plan.keys(), key=lambda x: (x[0], x[1] if x[1] != "—" else "zzz"))
+    
+    # Convert to response format
+    unit_mix = []
+    total_units = 0
+    total_occupied = 0
+    total_actual_rent = Decimal("0")
+    total_market_rent = Decimal("0")
+    
+    for sf, unit_label in sorted_floor_plans:
+        units = units_by_floor_plan[(sf, unit_label)]
+        
+        # Calculate aggregated metrics
+        group_total_units = len(units)
+        group_occupied_units = len([u for u in units if u.lease_status.lower() == "occupied"])
+        group_vacant_units = group_total_units - group_occupied_units
+        
+        # Calculate averages
+        square_feet_values = [u.square_feet for u in units if u.square_feet is not None]
+        avg_square_feet = int(sum(square_feet_values) / len(square_feet_values)) if square_feet_values else None
+        
+        bedroom_values = [u.bedrooms for u in units if u.bedrooms is not None]
+        avg_bedrooms = sum(bedroom_values) / len(bedroom_values) if bedroom_values else None
+        
+        bathroom_values = [u.bathrooms for u in units if u.bathrooms is not None]
+        avg_bathrooms = sum(bathroom_values) / len(bathroom_values) if bathroom_values else None
+        
+        # Calculate rent metrics
+        actual_rents = [float(u.actual_rent) for u in units if u.actual_rent > 0]
+        market_rents = [float(u.market_rent) for u in units if u.market_rent > 0]
+        
+        avg_actual_rent = Decimal(str(sum(actual_rents) / len(actual_rents))) if actual_rents else Decimal("0")
+        avg_market_rent = Decimal(str(sum(market_rents) / len(market_rents))) if market_rents else Decimal("0")
+        
+        # Calculate rent premium
+        rent_premium = avg_actual_rent - avg_market_rent if avg_market_rent > 0 else Decimal("0")
+        
+        # Calculate totals
+        total_square_feet = sum(square_feet_values) if square_feet_values else None
+        group_total_actual_rent = avg_actual_rent * group_total_units
+        group_total_market_rent = avg_market_rent * group_total_units
+        group_total_pro_forma_rent = group_total_actual_rent  # Default to actual rent
+        
+        # Get unit type from first unit (for display)
+        unit_type = units[0].unit_type if units else "Unknown"
+        
+        unit_mix.append({
+            "id": len(unit_mix) + 1,  # Generate ID for frontend
+            "unit_type": f"{sf} SF",  # Use square footage as the "unit type"
+            "unit_label": f"{unit_type} - {sf} SF",  # Show the unit type with square footage
+            "total_units": group_total_units,
+            "occupied_units": group_occupied_units,
+            "vacant_units": group_vacant_units,
+            "avg_square_feet": avg_square_feet,
+            "avg_bedrooms": avg_bedrooms,
+            "avg_bathrooms": avg_bathrooms,
+            "avg_actual_rent": float(avg_actual_rent),
+            "avg_market_rent": float(avg_market_rent),
+            "rent_premium": float(rent_premium),
+            "pro_forma_rent": float(avg_actual_rent),  # Default to actual rent
+            "rent_growth_rate": None,
+            "total_square_feet": total_square_feet,
+            "total_actual_rent": float(group_total_actual_rent),
+            "total_market_rent": float(group_total_market_rent),
+            "total_pro_forma_rent": float(group_total_pro_forma_rent)
+        })
+        
+        total_units += group_total_units
+        total_occupied += group_occupied_units
+        total_actual_rent += group_total_actual_rent
+        total_market_rent += group_total_market_rent
+    
+    # Get provenance info from first unit mix row if exists
+    provenance = "MANUAL"
+    is_linked_to_nrr = False
+    rent_roll_name = None
+    last_derived_at = None
+    last_manual_edit_at = None
+    
+    # Check if there's existing unit mix data to get provenance
+    existing_ums = session.exec(
+        select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
+    ).all()
+    
+    if existing_ums:
+        first_row = existing_ums[0]
+        provenance = first_row.provenance
+        is_linked_to_nrr = first_row.is_linked_to_nrr
+        rent_roll_name = first_row.rent_roll_name
+        last_derived_at = first_row.last_derived_at.isoformat() if first_row.last_derived_at else None
+        last_manual_edit_at = first_row.last_manual_edit_at.isoformat() if first_row.last_manual_edit_at else None
+    
+    return UnitMixResponse(
+        deal_id=deal_id,
+        provenance=provenance,
+        is_linked_to_nrr=is_linked_to_nrr,
+        rent_roll_name=rent_roll_name,
+        last_derived_at=last_derived_at,
+        last_manual_edit_at=last_manual_edit_at,
+        unit_mix=unit_mix,
+        totals={
+            "total_units": total_units,
+            "total_occupied": total_occupied,
+            "total_actual_rent": float(total_actual_rent),
+            "total_market_rent": float(total_market_rent)
+        }
+    )
+
+
+def get_unit_mix_by_unit_label(deal_id: int, session: Session) -> UnitMixResponse:
+    """Get unit mix data grouped by unit label."""
+    # Get normalized rent roll data
+    rent_roll_data = session.exec(
+        select(RentRollNormalized).where(RentRollNormalized.deal_id == deal_id)
+    ).all()
+    
+    if not rent_roll_data:
+        return UnitMixResponse(
+            deal_id=deal_id,
+            provenance="MANUAL",
+            is_linked_to_nrr=False,
+            unit_mix=[],
+            totals={
+                "total_units": 0,
+                "total_occupied": 0,
+                "total_actual_rent": 0.0,
+                "total_market_rent": 0.0
+            }
+        )
+    
+    # Group units by unit label
+    units_by_label = {}
+    for unit in rent_roll_data:
+        # Use unit_label if available, otherwise use "—" for blank
+        unit_label = unit.unit_label.strip() if unit.unit_label and unit.unit_label.strip() else "—"
+        
+        if unit_label not in units_by_label:
+            units_by_label[unit_label] = []
+        units_by_label[unit_label].append(unit)
+    
+    # Sort by unit label A→Z, blanks last
+    sorted_labels = sorted(units_by_label.keys(), key=lambda x: x if x != "—" else "zzz")
+    
+    # Convert to response format
+    unit_mix = []
+    total_units = 0
+    total_occupied = 0
+    total_actual_rent = Decimal("0")
+    total_market_rent = Decimal("0")
+    
+    for unit_label in sorted_labels:
+        units = units_by_label[unit_label]
+        
+        # Calculate aggregated metrics
+        group_total_units = len(units)
+        group_occupied_units = len([u for u in units if u.lease_status.lower() == "occupied"])
+        group_vacant_units = group_total_units - group_occupied_units
+        
+        # Calculate averages
+        square_feet_values = [u.square_feet for u in units if u.square_feet is not None]
+        avg_square_feet = int(sum(square_feet_values) / len(square_feet_values)) if square_feet_values else None
+        
+        bedroom_values = [u.bedrooms for u in units if u.bedrooms is not None]
+        avg_bedrooms = sum(bedroom_values) / len(bedroom_values) if bedroom_values else None
+        
+        bathroom_values = [u.bathrooms for u in units if u.bathrooms is not None]
+        avg_bathrooms = sum(bathroom_values) / len(bathroom_values) if bathroom_values else None
+        
+        # Calculate rent metrics
+        actual_rents = [float(u.actual_rent) for u in units if u.actual_rent > 0]
+        market_rents = [float(u.market_rent) for u in units if u.market_rent > 0]
+        
+        avg_actual_rent = Decimal(str(sum(actual_rents) / len(actual_rents))) if actual_rents else Decimal("0")
+        avg_market_rent = Decimal(str(sum(market_rents) / len(market_rents))) if market_rents else Decimal("0")
+        
+        # Calculate rent premium
+        rent_premium = avg_actual_rent - avg_market_rent if avg_market_rent > 0 else Decimal("0")
+        
+        # Calculate totals
+        total_square_feet = sum(square_feet_values) if square_feet_values else None
+        group_total_actual_rent = avg_actual_rent * group_total_units
+        group_total_market_rent = avg_market_rent * group_total_units
+        group_total_pro_forma_rent = group_total_actual_rent  # Default to actual rent
+        
+        # Get unit type from first unit (for display)
+        unit_type = units[0].unit_type if units else "Unknown"
+        
+        unit_mix.append({
+            "id": len(unit_mix) + 1,  # Generate ID for frontend
+            "unit_type": unit_label,  # Use unit label as the "unit type"
+            "unit_label": unit_label,  # Show the actual unit label
+            "total_units": group_total_units,
+            "occupied_units": group_occupied_units,
+            "vacant_units": group_vacant_units,
+            "avg_square_feet": avg_square_feet,
+            "avg_bedrooms": avg_bedrooms,
+            "avg_bathrooms": avg_bathrooms,
+            "avg_actual_rent": float(avg_actual_rent),
+            "avg_market_rent": float(avg_market_rent),
+            "rent_premium": float(rent_premium),
+            "pro_forma_rent": float(avg_actual_rent),  # Default to actual rent
+            "rent_growth_rate": None,
+            "total_square_feet": total_square_feet,
+            "total_actual_rent": float(group_total_actual_rent),
+            "total_market_rent": float(group_total_market_rent),
+            "total_pro_forma_rent": float(group_total_pro_forma_rent)
+        })
+        
+        total_units += group_total_units
+        total_occupied += group_occupied_units
+        total_actual_rent += group_total_actual_rent
+        total_market_rent += group_total_market_rent
+    
+    # Get provenance info from first unit mix row if exists
+    provenance = "MANUAL"
+    is_linked_to_nrr = False
+    rent_roll_name = None
+    last_derived_at = None
+    last_manual_edit_at = None
+    
+    # Check if there's existing unit mix data to get provenance
+    existing_ums = session.exec(
+        select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
+    ).all()
+    
+    if existing_ums:
+        first_row = existing_ums[0]
+        provenance = first_row.provenance
+        is_linked_to_nrr = first_row.is_linked_to_nrr
+        rent_roll_name = first_row.rent_roll_name
+        last_derived_at = first_row.last_derived_at.isoformat() if first_row.last_derived_at else None
+        last_manual_edit_at = first_row.last_manual_edit_at.isoformat() if first_row.last_manual_edit_at else None
+    
+    return UnitMixResponse(
+        deal_id=deal_id,
+        provenance=provenance,
+        is_linked_to_nrr=is_linked_to_nrr,
+        rent_roll_name=rent_roll_name,
+        last_derived_at=last_derived_at,
+        last_manual_edit_at=last_manual_edit_at,
+        unit_mix=unit_mix,
+        totals={
+            "total_units": total_units,
+            "total_occupied": total_occupied,
+            "total_actual_rent": float(total_actual_rent),
+            "total_market_rent": float(total_market_rent)
+        }
+    )
+
+
 @router.get("/deals/{deal_id}/unit-mix", response_model=UnitMixResponse)
 async def get_unit_mix(
     deal_id: int,
+    group_by: str = "square_feet",
     session: Session = Depends(get_session)
 ) -> UnitMixResponse:
     """Get unit mix summary for a deal."""
@@ -169,10 +454,18 @@ async def get_unit_mix(
         raise HTTPException(status_code=404, detail="Deal not found")
     
     # Get unit mix data
-    unit_mix_data = session.exec(
-        select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
-        .order_by(UnitMixSummary.unit_type)
-    ).all()
+    if group_by == "square_feet":
+        # For floor plan grouping, we need to derive from rent roll data directly
+        return get_unit_mix_by_floor_plan(deal_id, session)
+    elif group_by == "unit_label":
+        # For unit label grouping, we need to derive from rent roll data directly
+        return get_unit_mix_by_unit_label(deal_id, session)
+    else:
+        # Default unit type grouping
+        unit_mix_data = session.exec(
+            select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
+            .order_by(UnitMixSummary.unit_type)
+        ).all()
     
     # Get provenance info from first row (all rows should have same provenance for a deal)
     provenance = "MANUAL"
@@ -412,5 +705,76 @@ async def delete_unit_mix_row(
     session.delete(ums)
     session.commit()
     return {"success": True, "message": "Unit mix row deleted successfully"}
+
+
+class BulkUpdateUnitLabelRequest(BaseModel):
+    """Schema for bulk updating unit labels."""
+    square_feet: int
+    old_unit_label: Optional[str] = None
+    new_unit_label: str
+
+
+@router.patch("/deals/{deal_id}/rentroll/units/labels")
+async def bulk_update_unit_labels(
+    deal_id: int,
+    request: BulkUpdateUnitLabelRequest,
+    session: Session = Depends(get_session)
+) -> dict:
+    """Bulk update unit labels for all units in a floor plan grouping."""
+    # Verify deal exists
+    deal = session.get(Deal, deal_id)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    
+    # Validate unit label format
+    if request.new_unit_label:
+        if len(request.new_unit_label) > 16:
+            raise HTTPException(status_code=422, detail="Unit label must be 16 characters or less")
+        
+        # Check for allowed characters: A-Z, a-z, 0-9, hyphen, underscore
+        import re
+        if not re.match(r'^[A-Za-z0-9\-_]+$', request.new_unit_label):
+            raise HTTPException(status_code=422, detail="Unit label can only contain letters, numbers, hyphens, and underscores")
+    
+    # Normalize the new unit label (trim and uppercase)
+    new_unit_label = request.new_unit_label.strip().upper() if request.new_unit_label else None
+    old_unit_label = request.old_unit_label.strip() if request.old_unit_label and request.old_unit_label.strip() else None
+    
+    # Find units to update
+    query = select(RentRollNormalized).where(
+        RentRollNormalized.deal_id == deal_id,
+        RentRollNormalized.square_feet == request.square_feet
+    )
+    
+    if old_unit_label:
+        # Update specific label
+        query = query.where(RentRollNormalized.unit_label == old_unit_label)
+    else:
+        # Update blank/null labels
+        query = query.where(
+            (RentRollNormalized.unit_label.is_(None)) | 
+            (RentRollNormalized.unit_label == "") |
+            (RentRollNormalized.unit_label == "—")
+        )
+    
+    units_to_update = session.exec(query).all()
+    
+    if not units_to_update:
+        raise HTTPException(status_code=404, detail="No units found matching the criteria")
+    
+    # Update the units
+    updated_count = 0
+    for unit in units_to_update:
+        unit.unit_label = new_unit_label
+        session.add(unit)
+        updated_count += 1
+    
+    session.commit()
+    
+    return {
+        "success": True, 
+        "message": f"Updated unit label for {updated_count} units",
+        "updated_count": updated_count
+    }
 
 

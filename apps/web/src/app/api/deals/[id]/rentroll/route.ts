@@ -6,50 +6,52 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  console.log('=== RENTROLL API ROUTE CALLED ===')
+  console.log('Request URL:', request.url)
+  console.log('Params:', params)
+  
+  const dealId = params.id
+  
   try {
-    const dealId = params.id
+    const url = `http://localhost:8000/api/deals/${dealId}/rentroll`
+    
+    console.log('Fetching rent roll for deal:', dealId)
+    console.log('Full URL:', url)
     
     // Get normalized rent roll data
-    const response = await fetch(`${API_BASE_URL}/api/deals/${dealId}/rentroll/normalized`, {
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
     })
 
+    console.log('Backend response status:', response.status)
+    
     if (!response.ok) {
-      throw new Error(`Backend API error: ${response.status}`)
+      const errorText = await response.text()
+      console.error('Backend API error:', response.status, errorText)
+      throw new Error(`Backend API error: ${response.status} - ${errorText}`)
     }
 
-    const nrrData = await response.json()
-    
-    // Convert to expected format for RentRollTable
-    const rentRollData = {
-      deal_id: parseInt(dealId),
-      units: nrrData.data.map((unit: any) => ({
-        id: unit.unit_number, // Use unit_number as ID
-        unit_number: unit.unit_number,
-        unit_label: unit.unit_label,
-        unit_type: 'Unknown', // This would need to be derived or stored
-        square_feet: unit.unit_sf,
-        bedrooms: null,
-        bathrooms: null,
-        actual_rent: unit.actual_rent,
-        market_rent: unit.market_rent || 0,
-        lease_start: unit.lease_start_date,
-        move_in_date: unit.move_in_date,
-        lease_expiration: unit.lease_expiration_date,
-        tenant_name: null,
-        lease_status: 'occupied' // Default status
-      })),
-      total_units: nrrData.total_count
-    }
+    const rentRollData = await response.json()
+    console.log('Backend response data keys:', Object.keys(rentRollData))
+    console.log('Total units from backend:', rentRollData.total_units)
+    console.log('Units count from backend:', rentRollData.units?.length)
 
     return NextResponse.json(rentRollData)
   } catch (error) {
     console.error('Error fetching rent roll data:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch rent roll data' },
+      { 
+        error: `Failed to fetch rent roll data: ${error instanceof Error ? error.message : String(error)}`,
+        debug: {
+          dealId,
+          url: `http://localhost:8000/api/deals/${dealId}/rentroll`,
+          errorType: typeof error,
+          errorMessage: error instanceof Error ? error.message : String(error)
+        }
+      },
       { status: 500 }
     )
   }

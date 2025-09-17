@@ -44,7 +44,7 @@ export default function RentRollPage() {
   const queryClient = useQueryClient()
   
   // We need to get the deal ID for API calls, but use slug for navigation
-  const [dealId, setDealId] = useState<string | null>(null)
+  const [dealId, setDealId] = useState<string | null>('7') // Hardcoded for testing
 
   // Fetch deal by slug to get the ID
   useEffect(() => {
@@ -76,7 +76,8 @@ export default function RentRollPage() {
     enabled: !!dealId
   })
 
-  if (rentRollLoading) {
+
+  if (!dealId || rentRollLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -97,8 +98,8 @@ export default function RentRollPage() {
             <p className="text-red-700 mb-4">
               {rentRollError.message}
             </p>
-            <Link href={`/deals/${dealSlug}`} className="btn btn-primary">
-              Back to Deal
+            <Link href={`/deals/${dealSlug}/unit-mix`} className="btn btn-primary">
+              Back to Unit Mix
             </Link>
           </div>
         </div>
@@ -106,16 +107,20 @@ export default function RentRollPage() {
     )
   }
 
+  // Debug logging
+  console.log('Rent roll data:', rentRollData)
+  console.log('Units length:', rentRollData?.units?.length)
+
   if (!rentRollData || rentRollData.units.length === 0) {
     return (
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <Link
-            href={`/deals/${dealSlug}`}
+            href={`/deals/${dealSlug}/unit-mix`}
             className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
           >
             <ArrowLeft className="h-4 w-4 mr-1" />
-            Back to Deal
+            Back to Unit Mix
           </Link>
         </div>
 
@@ -126,7 +131,7 @@ export default function RentRollPage() {
             Upload a rent roll file to analyze unit-level data.
           </p>
           <Link
-            href={`/deals/${dealSlug}`}
+            href={`/deals/${dealSlug}/unit-mix`}
             className="btn btn-primary"
           >
             <Upload className="h-4 w-4 mr-2" />
@@ -142,11 +147,11 @@ export default function RentRollPage() {
       {/* Header */}
       <div className="mb-8">
         <Link
-          href={`/deals/${dealSlug}`}
+          href={`/deals/${dealSlug}/unit-mix`}
           className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
         >
           <ArrowLeft className="h-4 w-4 mr-1" />
-          Back to Deal
+          Back to Unit Mix
         </Link>
         <div className="mt-4">
           <h1 className="text-3xl font-bold text-gray-900">Rent Roll</h1>

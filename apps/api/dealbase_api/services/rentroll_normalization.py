@@ -18,6 +18,7 @@ class RentRollNormalizer:
     # Column mapping patterns for auto-detection
     UNIT_NUMBER_PATTERNS = ['unit', 'apt', 'suite', 'number', 'unit_number', 'unit_num', 'unit number']
     UNIT_TYPE_PATTERNS = ['type', 'bedroom', 'bed', 'br', 'unit_type', 'unittype', 'unit type']
+    UNIT_LABEL_PATTERNS = ['floorplan', 'floor_plan', 'plan', 'unit_label', 'label', 'plan_code', 'unit label', 'plan code', 'floor plan']
     SQUARE_FEET_PATTERNS = ['sqft', 'sf', 'square_feet', 'squareft', 'size', 'area', 'square feet']
     BEDROOM_PATTERNS = ['bedroom', 'bed', 'br', 'bedrooms', 'beds']
     BATHROOM_PATTERNS = ['bath', 'bathroom', 'ba', 'bathrooms']
@@ -106,6 +107,14 @@ class RentRollNormalizer:
                     mapping['unit_type'] = df.columns[i]
                     break
         
+        # Unit label detection (floorplan, plan code, etc.)
+        for pattern in self.UNIT_LABEL_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'unit_label' not in mapping:
+                    mapping['unit_label'] = df.columns[i]
+                    print(f"DEBUG: Mapped unit_label to column: '{df.columns[i]}' (pattern: '{pattern}')")
+                    break
+        
         # Square feet detection
         for pattern in self.SQUARE_FEET_PATTERNS:
             for i, col in enumerate(columns_lower):
@@ -180,6 +189,15 @@ class RentRollNormalizer:
             # Infer unit type from other fields if available
             normalized_df['unit_type'] = self._infer_unit_type(df, mapping)
         
+        # Unit label mapping (floorplan, plan code, etc.)
+        if 'unit_label' in mapping:
+            normalized_df['unit_label'] = df[mapping['unit_label']].astype(str).str.strip()
+            # Replace empty strings and 'nan' with None
+            normalized_df['unit_label'] = normalized_df['unit_label'].replace(['', 'nan', 'NaN', 'None'], None)
+        else:
+            # Set unit_label to None if not found
+            normalized_df['unit_label'] = None
+        
         if 'square_feet' in mapping:
             normalized_df['square_feet'] = pd.to_numeric(df[mapping['square_feet']], errors='coerce').fillna(0)
         
@@ -224,7 +242,6 @@ class RentRollNormalizer:
             normalized_df['tenant_name'] = df[mapping['tenant_name']].astype(str).str.strip()
         
         # Add derived fields
-        normalized_df['unit_label'] = normalized_df['unit_type']  # Default label
         normalized_df['move_in_date'] = normalized_df.get('lease_start', None)
         normalized_df['lease_status'] = 'occupied'
         normalized_df['is_duplicate'] = False
@@ -437,7 +454,7 @@ class RentRollNormalizer:
         # Create unit mix summary for each type
         for unit_type, units in unit_type_groups.items():
             total_units = len(units)
-            occupied_units = len([u for u in units if u.lease_status == 'occupied'])
+            occupied_units = len([u for u in units if u.lease_status.lower() == 'occupied'])
             vacant_units = total_units - occupied_units
             
             # Calculate averages

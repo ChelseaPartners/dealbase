@@ -6,14 +6,10 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const dealId = params.id
+  
   try {
-    const dealId = params.id
-    const url = `${API_BASE_URL}/api/deals/${dealId}/unit-mix`
-    
-    console.log('=== NEXT.JS API DEBUG ===')
-    console.log('API_BASE_URL:', API_BASE_URL)
-    console.log('Deal ID:', dealId)
-    console.log('Full URL:', url)
+    const url = `http://localhost:8000/api/deals/${dealId}/unit-mix`
     
     const response = await fetch(url, {
       method: 'GET',
@@ -22,25 +18,24 @@ export async function GET(
       },
     })
 
-    console.log('Response status:', response.status)
-    console.log('Response headers:', Object.fromEntries(response.headers.entries()))
-
     if (!response.ok) {
-      const errorText = await response.text()
-      console.log('Error response body:', errorText)
-      throw new Error(`Backend API error: ${response.status} - ${errorText}`)
+      throw new Error(`Backend API error: ${response.status}`)
     }
 
     const data = await response.json()
-    console.log('Response data keys:', Object.keys(data))
-    console.log('Full response data:', JSON.stringify(data, null, 2))
-    console.log('=== END DEBUG ===')
-    
     return NextResponse.json(data)
   } catch (error) {
     console.error('Error in Next.js API route:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch unit mix data', details: error instanceof Error ? error.message : String(error) },
+      { 
+        error: 'Failed to fetch unit mix data', 
+        details: error instanceof Error ? error.message : String(error),
+        debug: {
+          dealId,
+          url: `http://localhost:8000/api/deals/${dealId}/unit-mix`,
+          errorType: typeof error
+        }
+      },
       { status: 500 }
     )
   }
