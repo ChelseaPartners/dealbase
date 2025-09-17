@@ -104,19 +104,23 @@ async def intake_t12(
         # Try different header positions to find the actual column headers
         df = None
         
+        # Determine the appropriate engine based on file extension
+        engine = 'openpyxl' if file.filename.endswith('.xlsx') else 'xlrd'
+        
         # First, let's see what's in the first few rows
-        print(f"DEBUG: Analyzing Excel file structure...")
+        print(f"DEBUG: Analyzing Excel file structure with engine={engine}...")
         for row_num in range(10):
             try:
-                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1)
+                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1, engine=engine)
                 print(f"DEBUG: Row {row_num} columns: {list(test_df.columns)}")
-            except:
+            except Exception as e:
+                print(f"DEBUG: Failed to read row {row_num}: {e}")
                 break
         
         # Now try to find the best header position
         for header_row in range(10):  # Try headers 0-9
             try:
-                test_df = pd.read_excel(io.BytesIO(content), header=header_row)
+                test_df = pd.read_excel(io.BytesIO(content), header=header_row, engine=engine)
                 
                 # Check if we found meaningful column names
                 meaningful_cols = []
@@ -142,7 +146,7 @@ async def intake_t12(
         # If still no good columns found, use the original approach
         if df is None:
             print(f"DEBUG: ❌ No good header found, using default")
-            df = pd.read_excel(io.BytesIO(content))
+            df = pd.read_excel(io.BytesIO(content), engine=engine)
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
@@ -239,19 +243,23 @@ async def preview_rentroll(
         # Try different header positions to find the actual column headers
         df = None
         
+        # Determine the appropriate engine based on file extension
+        engine = 'openpyxl' if file.filename.endswith('.xlsx') else 'xlrd'
+        
         # First, let's see what's in the first few rows
-        print(f"DEBUG: Analyzing Excel file structure...")
+        print(f"DEBUG: Analyzing Excel file structure with engine={engine}...")
         for row_num in range(10):
             try:
-                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1)
+                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1, engine=engine)
                 print(f"DEBUG: Row {row_num} columns: {list(test_df.columns)}")
-            except:
+            except Exception as e:
+                print(f"DEBUG: Failed to read row {row_num}: {e}")
                 break
         
         # Now try to find the best header position
         for header_row in range(10):  # Try headers 0-9
             try:
-                test_df = pd.read_excel(io.BytesIO(content), header=header_row)
+                test_df = pd.read_excel(io.BytesIO(content), header=header_row, engine=engine)
                 
                 # Check if we found meaningful column names
                 meaningful_cols = []
@@ -277,7 +285,7 @@ async def preview_rentroll(
         # If still no good columns found, use the original approach
         if df is None:
             print(f"DEBUG: ❌ No good header found, using default")
-            df = pd.read_excel(io.BytesIO(content))
+            df = pd.read_excel(io.BytesIO(content), engine=engine)
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
@@ -335,19 +343,23 @@ async def upload_rentroll(
         # Try different header positions to find the actual column headers
         df = None
         
+        # Determine the appropriate engine based on file extension
+        engine = 'openpyxl' if file.filename.endswith('.xlsx') else 'xlrd'
+        
         # First, let's see what's in the first few rows
-        print(f"DEBUG: Analyzing Excel file structure...")
+        print(f"DEBUG: Analyzing Excel file structure with engine={engine}...")
         for row_num in range(10):
             try:
-                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1)
+                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1, engine=engine)
                 print(f"DEBUG: Row {row_num} columns: {list(test_df.columns)}")
-            except:
+            except Exception as e:
+                print(f"DEBUG: Failed to read row {row_num}: {e}")
                 break
         
         # Now try to find the best header position
         for header_row in range(10):  # Try headers 0-9
             try:
-                test_df = pd.read_excel(io.BytesIO(content), header=header_row)
+                test_df = pd.read_excel(io.BytesIO(content), header=header_row, engine=engine)
                 
                 # Check if we found meaningful column names
                 meaningful_cols = []
@@ -373,7 +385,7 @@ async def upload_rentroll(
         # If still no good columns found, use the original approach
         if df is None:
             print(f"DEBUG: ❌ No good header found, using default")
-            df = pd.read_excel(io.BytesIO(content))
+            df = pd.read_excel(io.BytesIO(content), engine=engine)
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
