@@ -120,7 +120,7 @@ export default async function DealsPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
-              {deals.map((deal) => (
+              {deals.map((deal: any) => (
                 <tr key={deal.id} className="hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 transition-all duration-200 group">
                   <td className="px-6 py-5 whitespace-nowrap">
                     <div className="flex items-center">

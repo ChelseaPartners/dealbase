@@ -60,7 +60,7 @@ describe('Page Smoke Tests', () => {
     
     render(
       <TestWrapper>
-        <DealDetailPage />
+        <DealDetailPage params={{ id: '1' }} />
       </TestWrapper>
     )
     
