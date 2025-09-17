@@ -42,14 +42,31 @@ async def intake_t12(
     if file.filename.endswith('.csv'):
         df = pd.read_csv(io.StringIO(content.decode('utf-8')))
     elif file.filename.endswith(('.xlsx', '.xls')):
-        # Try reading with header=0 first (default)
-        df = pd.read_excel(io.BytesIO(content))
+        # Try different header positions to find the actual column headers
+        df = None
+        for header_row in range(5):  # Try headers 0-4
+            try:
+                test_df = pd.read_excel(io.BytesIO(content), header=header_row)
+                
+                # Check if we found meaningful column names
+                meaningful_cols = sum(1 for col in test_df.columns 
+                                    if not col.startswith('Unnamed:') and 
+                                    str(col).strip() not in ['', 'nan', 'NaN'])
+                
+                if meaningful_cols >= 3:  # Need at least 3 meaningful columns
+                    df = test_df
+                    print(f"DEBUG: Using header={header_row}, found {meaningful_cols} meaningful columns")
+                    print(f"DEBUG: Columns: {list(df.columns)}")
+                    break
+                    
+            except Exception as e:
+                print(f"DEBUG: Failed to read with header={header_row}: {e}")
+                continue
         
-        # If all columns are unnamed, try reading with header=1 (skip first row)
-        if all(col.startswith('Unnamed:') for col in df.columns):
-            print(f"DEBUG: All columns unnamed, trying header=1")
-            df = pd.read_excel(io.BytesIO(content), header=1)
-            print(f"DEBUG: After header=1, columns: {list(df.columns)}")
+        # If still no good columns found, use the original approach
+        if df is None:
+            print(f"DEBUG: No good header found, using default")
+            df = pd.read_excel(io.BytesIO(content))
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
@@ -143,14 +160,31 @@ async def preview_rentroll(
     if file.filename.endswith('.csv'):
         df = pd.read_csv(io.StringIO(content.decode('utf-8')))
     elif file.filename.endswith(('.xlsx', '.xls')):
-        # Try reading with header=0 first (default)
-        df = pd.read_excel(io.BytesIO(content))
+        # Try different header positions to find the actual column headers
+        df = None
+        for header_row in range(5):  # Try headers 0-4
+            try:
+                test_df = pd.read_excel(io.BytesIO(content), header=header_row)
+                
+                # Check if we found meaningful column names
+                meaningful_cols = sum(1 for col in test_df.columns 
+                                    if not col.startswith('Unnamed:') and 
+                                    str(col).strip() not in ['', 'nan', 'NaN'])
+                
+                if meaningful_cols >= 3:  # Need at least 3 meaningful columns
+                    df = test_df
+                    print(f"DEBUG: Using header={header_row}, found {meaningful_cols} meaningful columns")
+                    print(f"DEBUG: Columns: {list(df.columns)}")
+                    break
+                    
+            except Exception as e:
+                print(f"DEBUG: Failed to read with header={header_row}: {e}")
+                continue
         
-        # If all columns are unnamed, try reading with header=1 (skip first row)
-        if all(col.startswith('Unnamed:') for col in df.columns):
-            print(f"DEBUG: All columns unnamed, trying header=1")
-            df = pd.read_excel(io.BytesIO(content), header=1)
-            print(f"DEBUG: After header=1, columns: {list(df.columns)}")
+        # If still no good columns found, use the original approach
+        if df is None:
+            print(f"DEBUG: No good header found, using default")
+            df = pd.read_excel(io.BytesIO(content))
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
@@ -201,14 +235,31 @@ async def upload_rentroll(
     if file.filename.endswith('.csv'):
         df = pd.read_csv(io.StringIO(content.decode('utf-8')))
     elif file.filename.endswith(('.xlsx', '.xls')):
-        # Try reading with header=0 first (default)
-        df = pd.read_excel(io.BytesIO(content))
+        # Try different header positions to find the actual column headers
+        df = None
+        for header_row in range(5):  # Try headers 0-4
+            try:
+                test_df = pd.read_excel(io.BytesIO(content), header=header_row)
+                
+                # Check if we found meaningful column names
+                meaningful_cols = sum(1 for col in test_df.columns 
+                                    if not col.startswith('Unnamed:') and 
+                                    str(col).strip() not in ['', 'nan', 'NaN'])
+                
+                if meaningful_cols >= 3:  # Need at least 3 meaningful columns
+                    df = test_df
+                    print(f"DEBUG: Using header={header_row}, found {meaningful_cols} meaningful columns")
+                    print(f"DEBUG: Columns: {list(df.columns)}")
+                    break
+                    
+            except Exception as e:
+                print(f"DEBUG: Failed to read with header={header_row}: {e}")
+                continue
         
-        # If all columns are unnamed, try reading with header=1 (skip first row)
-        if all(col.startswith('Unnamed:') for col in df.columns):
-            print(f"DEBUG: All columns unnamed, trying header=1")
-            df = pd.read_excel(io.BytesIO(content), header=1)
-            print(f"DEBUG: After header=1, columns: {list(df.columns)}")
+        # If still no good columns found, use the original approach
+        if df is None:
+            print(f"DEBUG: No good header found, using default")
+            df = pd.read_excel(io.BytesIO(content))
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
