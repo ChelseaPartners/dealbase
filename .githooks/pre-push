@@ -1,0 +1,44 @@
+#!/bin/bash
+# Pre-push hook: Run smoke tests for golden paths
+# This prevents pushing code that breaks core functionality
+
+set -e
+
+echo "🔍 Running pre-push smoke tests..."
+
+# Check if we're in the right directory
+if [ ! -f "package.json" ]; then
+    echo "❌ Error: Not in project root directory"
+    exit 1
+fi
+
+# Run TypeScript check
+echo "📝 Checking TypeScript..."
+pnpm typecheck || {
+    echo "❌ TypeScript check failed"
+    exit 1
+}
+
+# Run linting
+echo "🧹 Running linter..."
+pnpm lint || {
+    echo "❌ Linting failed"
+    exit 1
+}
+
+# Run build check
+echo "🏗️  Checking build..."
+pnpm build || {
+    echo "❌ Build failed"
+    exit 1
+}
+
+# Run fast unit tests
+echo "🧪 Running unit tests..."
+pnpm test || {
+    echo "❌ Unit tests failed"
+    exit 1
+}
+
+echo "✅ All pre-push checks passed!"
+echo "🚀 Ready to push!"

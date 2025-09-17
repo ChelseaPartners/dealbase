@@ -65,7 +65,7 @@ function SortButton({
         'hover:text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-color)] focus:ring-offset-1',
         isActive ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-tertiary)]'
       )}
-      aria-sort={isActive ? (isAsc ? 'ascending' : isDesc ? 'descending' : 'none') : 'none'}
+      aria-label={`Sort by ${field} ${isActive ? (isAsc ? 'ascending' : isDesc ? 'descending' : 'none') : 'none'}`}
     >
       {children}
       <div className="flex flex-col">
