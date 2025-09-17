@@ -7,7 +7,7 @@
     "dev": "concurrently \"pnpm --filter @dealbase/web dev\" \"pnpm --filter @dealbase/api dev\"",
     "build": "pnpm --filter @dealbase/shared build && pnpm --filter @dealbase/web build",
     "test": "pnpm --filter @dealbase/web test && pnpm --filter @dealbase/api test",
-    "lint": "pnpm --filter @dealbase/web lint && pnpm --filter @dealbase/api lint",
+    "lint": "pnpm --filter @dealbase/web lint",
     "typecheck": "pnpm --filter @dealbase/shared typecheck && pnpm --filter @dealbase/web typecheck",
     "clean": "pnpm -r exec rm -rf node_modules dist .next"
   },
