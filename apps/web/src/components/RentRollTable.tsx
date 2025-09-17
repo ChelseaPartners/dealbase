@@ -40,6 +40,19 @@ export function RentRollTable({ units, onEditUnit, showDetails = false }: RentRo
     }).format(amount)
   }
 
+  const formatUnitNumber = (unitNumber: string) => {
+    // Remove any decimal points and convert to number for formatting
+    const num = parseFloat(unitNumber)
+    if (isNaN(num)) return unitNumber
+    return num.toLocaleString()
+  }
+
+  const formatUnitType = (unit: RentRollUnit) => {
+    const bedrooms = unit.bedrooms || 0
+    const bathrooms = unit.bathrooms || 0
+    return `${bedrooms}BD / ${bathrooms}BA`
+  }
+
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A'
     return new Date(dateString).toLocaleDateString()
@@ -137,10 +150,10 @@ export function RentRollTable({ units, onEditUnit, showDetails = false }: RentRo
           <thead className="bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Unit
+                Unit #
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Type
+                Unit Type
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 SF
@@ -186,20 +199,13 @@ export function RentRollTable({ units, onEditUnit, showDetails = false }: RentRo
                           <Eye className="h-4 w-4" />
                         )}
                       </button>
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          {unit.unit_number}
-                        </div>
-                        {unit.unit_label && (
-                          <div className="text-sm text-gray-500">
-                            {unit.unit_label}
-                          </div>
-                        )}
+                      <div className="text-sm font-medium text-gray-900">
+                        {formatUnitNumber(unit.unit_number)}
                       </div>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm text-gray-900">{unit.unit_type}</span>
+                    <span className="text-sm text-gray-900">{formatUnitType(unit)}</span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {unit.square_feet ? `${unit.square_feet.toLocaleString()} SF` : 'N/A'}
@@ -238,7 +244,7 @@ export function RentRollTable({ units, onEditUnit, showDetails = false }: RentRo
                 {/* Expanded row with additional details */}
                 {expandedUnits.has(unit.id) && (
                   <tr className="bg-gray-50">
-                    <td colSpan={showDetails ? 8 : 7} className="px-6 py-4">
+                    <td colSpan={showDetails ? 9 : 8} className="px-6 py-4">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div>
                           <span className="font-medium text-gray-700">Bedrooms:</span>
