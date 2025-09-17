@@ -109,7 +109,7 @@ class RentRollNormalized(SQLModel, table=True):
 
 
 class UnitMixSummary(SQLModel, table=True):
-    """Aggregated unit mix data by unit type."""
+    """Aggregated unit mix data by unit type with provenance tracking."""
 
     __tablename__ = "unit_mix_summary"
 
@@ -144,6 +144,13 @@ class UnitMixSummary(SQLModel, table=True):
     total_actual_rent: Decimal = Field(default=Decimal("0"))
     total_market_rent: Decimal = Field(default=Decimal("0"))
     total_pro_forma_rent: Decimal = Field(default=Decimal("0"))
+    
+    # Provenance and linking fields
+    provenance: str = Field(default="MANUAL")  # "NRR" | "MANUAL"
+    is_linked_to_nrr: bool = Field(default=False)
+    rent_roll_name: Optional[str] = None  # Name of linked rent roll
+    last_derived_at: Optional[datetime] = None  # When last derived from NRR
+    last_manual_edit_at: Optional[datetime] = None  # When last manually edited
     
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

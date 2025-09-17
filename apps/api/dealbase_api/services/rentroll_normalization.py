@@ -185,6 +185,9 @@ class RentRollNormalizer:
         
         if 'bedrooms' in mapping:
             normalized_df['bedrooms'] = pd.to_numeric(df[mapping['bedrooms']], errors='coerce').fillna(0)
+        else:
+            # Create bedrooms column with default value if not detected
+            normalized_df['bedrooms'] = 0
         
         if 'bathrooms' in mapping:
             normalized_df['bathrooms'] = pd.to_numeric(df[mapping['bathrooms']], errors='coerce').fillna(0)
@@ -233,7 +236,7 @@ class RentRollNormalizer:
         """Infer unit type from bedroom count or other available data."""
         if 'bedrooms' in mapping:
             bedrooms = pd.to_numeric(df[mapping['bedrooms']], errors='coerce')
-            return bedrooms.apply(lambda x: f"{int(x) if pd.notna(x) else 0}BR" if pd.notna(x) else "Unknown")
+            return bedrooms.apply(lambda x: f"{int(float(x)) if pd.notna(x) else 0}BR" if pd.notna(x) else "Unknown")
         else:
             return pd.Series(["Unknown"] * len(df))
     
@@ -243,12 +246,19 @@ class RentRollNormalizer:
         # Identify duplicates based on unit number
         df['is_duplicate'] = df.duplicated(subset=['unit_number'], keep='first')
         
-        # Filter out applications and future move-ins
+        # Filter out applications and future move-ins (only if lease_start column exists)
         current_date = datetime.now()
-        df['is_application'] = (
-            (df['lease_start'] > current_date) | 
-            (df['lease_start'].isna() & df['tenant_name'].isna())
-        )
+        if 'lease_start' in df.columns and 'tenant_name' in df.columns:
+            df['is_application'] = (
+                (df['lease_start'] > current_date) | 
+                (df['lease_start'].isna() & df['tenant_name'].isna())
+            )
+        else:
+            # If no lease_start column, just check for empty tenant names
+            if 'tenant_name' in df.columns:
+                df['is_application'] = df['tenant_name'].isna()
+            else:
+                df['is_application'] = False
         
         # Keep only occupied units with actual rent (drop duplicates and applications)
         cleaned_df = df[
@@ -314,10 +324,13 @@ class RentRollNormalizer:
                 
                 # Helper function to safely convert to int
                 def safe_int(value):
-                    if pd.isna(value) or value is None:
+                    if pd.isna(value) or value is None or value == '':
                         return None
                     try:
-                        return int(float(value))
+                        float_val = float(value)
+                        if pd.isna(float_val):
+                            return None
+                        return int(float_val)
                     except (ValueError, TypeError):
                         return None
                 
@@ -338,10 +351,24 @@ class RentRollNormalizer:
                         float_val = float(value)
                         # Bathrooms should be reasonable numbers (0-10)
                         if 0 <= float_val <= 10:
-                            return float_val
+                            return int(float_val)
                         else:
                             print(f"WARNING: Invalid bathroom value {float_val}, setting to None")
                             return None
+                    except (ValueError, TypeError):
+                        return None
+                
+                # Helper function to safely convert dates, handling NaT values
+                def safe_date(value):
+                    if pd.isna(value) or value is None or value == '' or value == pd.NaT:
+                        return None
+                    try:
+                        if hasattr(value, 'to_pydatetime'):
+                            return value.to_pydatetime()
+                        elif hasattr(value, 'date'):
+                            return value.date()
+                        else:
+                            return pd.to_datetime(value).to_pydatetime()
                     except (ValueError, TypeError):
                         return None
                 
@@ -356,9 +383,9 @@ class RentRollNormalizer:
                     rent=Decimal(str(row.get('actual_rent', 0))),  # Populate old rent column
                     actual_rent=Decimal(str(row.get('actual_rent', 0))),
                     market_rent=Decimal(str(row.get('market_rent', 0))),
-                    lease_start=parse_date(row.get('lease_start')),
-                    move_in_date=parse_date(row.get('move_in_date')),
-                    lease_expiration=parse_date(row.get('lease_expiration')),
+                    lease_start=safe_date(row.get('lease_start')),
+                    move_in_date=safe_date(row.get('move_in_date')),
+                    lease_expiration=safe_date(row.get('lease_expiration')),
                     tenant_name=row.get('tenant_name'),
                     lease_status=row.get('lease_status', 'occupied'),
                     is_duplicate=bool(row.get('is_duplicate', False)),
@@ -435,13 +462,13 @@ class RentRollNormalizer:
                 total_units=total_units,
                 occupied_units=occupied_units,
                 vacant_units=vacant_units,
-                avg_square_feet=int(avg_sqft) if avg_sqft else None,
+                avg_square_feet=int(float(avg_sqft)) if avg_sqft else None,
                 avg_bedrooms=avg_bedrooms if avg_bedrooms else None,
                 avg_bathrooms=avg_bathrooms if avg_bathrooms else None,
                 avg_actual_rent=Decimal(str(avg_actual_rent)),
                 avg_market_rent=Decimal(str(avg_market_rent)),
                 rent_premium=Decimal(str(rent_premium)),
-                total_square_feet=int(total_sqft) if total_sqft else None,
+                total_square_feet=int(float(total_sqft)) if total_sqft else None,
                 total_actual_rent=Decimal(str(total_actual_rent)),
                 total_market_rent=Decimal(str(total_market_rent)),
                 total_pro_forma_rent=Decimal(str(total_market_rent))  # Default to market rent

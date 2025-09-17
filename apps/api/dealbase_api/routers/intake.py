@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlmodel import Session, select
 from pydantic import BaseModel
 import pandas as pd
+import numpy as np
 import io
 import os
 import hashlib
@@ -38,7 +39,7 @@ def save_document(deal_id: int, file: UploadFile, file_type: str, session: Sessi
     with open(file_path, "wb") as f:
         f.write(content)
     
-    # Clear existing documents of this type for this deal
+    # Check for existing documents of this type for this deal
     existing_docs = session.exec(
         select(DealDocument).where(
             DealDocument.deal_id == deal_id,
@@ -46,12 +47,10 @@ def save_document(deal_id: int, file: UploadFile, file_type: str, session: Sessi
         )
     ).all()
     
-    for doc in existing_docs:
-        # Delete the old file
-        old_file_path = Path(doc.file_path)
-        if old_file_path.exists():
-            old_file_path.unlink()
-        session.delete(doc)
+    # If there are existing documents, we'll keep them and add the new one
+    # The user can manage duplicates through the UI
+    if existing_docs:
+        print(f"DEBUG: Found {len(existing_docs)} existing {file_type} documents for deal {deal_id}. Adding new document without deleting existing ones.")
     
     # Create new document record
     document = DealDocument(
@@ -91,7 +90,7 @@ def save_document_with_content(deal_id: int, file: UploadFile, content: bytes, f
     with open(file_path, "wb") as f:
         f.write(content)
     
-    # Clear existing documents of this type for this deal
+    # Check for existing documents of this type for this deal
     existing_docs = session.exec(
         select(DealDocument).where(
             DealDocument.deal_id == deal_id,
@@ -99,12 +98,10 @@ def save_document_with_content(deal_id: int, file: UploadFile, content: bytes, f
         )
     ).all()
     
-    for doc in existing_docs:
-        # Delete the old file
-        old_file_path = Path(doc.file_path)
-        if old_file_path.exists():
-            old_file_path.unlink()
-        session.delete(doc)
+    # If there are existing documents, we'll keep them and add the new one
+    # The user can manage duplicates through the UI
+    if existing_docs:
+        print(f"DEBUG: Found {len(existing_docs)} existing {file_type} documents for deal {deal_id}. Adding new document without deleting existing ones.")
     
     # Create new document record
     document = DealDocument(
@@ -329,7 +326,7 @@ async def preview_rentroll(
     # Read file content
     content = await file.read()
     
-    # Parse based on file extension
+    # Parse based on file extension with improved header detection for rent roll
     if file.filename.endswith('.csv'):
         try:
             df = pd.read_csv(io.BytesIO(content))
@@ -339,23 +336,11 @@ async def preview_rentroll(
             print(f"DEBUG: CSV read failed: {e}")
             raise HTTPException(status_code=400, detail=f"Failed to read CSV file: {str(e)}")
     elif file.filename.endswith(('.xlsx', '.xls')):
-        # Try different header positions to find the actual column headers
+        # Use improved header detection for rent roll files
         df = None
-        
-        # Determine the appropriate engine based on file extension
         engine = 'openpyxl' if file.filename.endswith('.xlsx') else 'xlrd'
         
-        # First, let's see what's in the first few rows
         print(f"DEBUG: Analyzing Excel file structure with engine={engine}...")
-        for row_num in range(10):
-            try:
-                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1, engine=engine)
-                print(f"DEBUG: Row {row_num} columns: {list(test_df.columns)}")
-            except Exception as e:
-                print(f"DEBUG: Failed to read row {row_num}: {e}")
-                break
-        
-        # Now try to find the best header position
         for header_row in range(10):  # Try headers 0-9
             try:
                 test_df = pd.read_excel(io.BytesIO(content), header=header_row, engine=engine)
@@ -369,12 +354,12 @@ async def preview_rentroll(
                         len(col_str) > 1):
                         meaningful_cols.append(col_str)
                 
-                print(f"DEBUG: Header {header_row}: {len(meaningful_cols)} meaningful columns: {meaningful_cols}")
+                print(f"DEBUG: Header {header_row}: {len(meaningful_cols)} meaningful columns: {meaningful_cols[:5]}...")
                 
-                if len(meaningful_cols) >= 3:  # Need at least 3 meaningful columns
+                if len(meaningful_cols) >= 5:  # Need at least 5 meaningful columns for rent roll
                     df = test_df
                     print(f"DEBUG: ✅ Using header={header_row}, found {len(meaningful_cols)} meaningful columns")
-                    print(f"DEBUG: Final columns: {list(df.columns)}")
+                    print(f"DEBUG: Final columns: {list(df.columns)[:10]}...")
                     break
                     
             except Exception as e:
@@ -422,7 +407,7 @@ async def upload_rentroll(
     file: UploadFile = File(...),
     session: Session = Depends(get_session)
 ) -> dict:
-    """Upload and process rent roll data in one step."""
+    """Upload rent roll file - Step 1: Simple file storage only."""
     print(f"DEBUG: Starting upload - deal_id: {deal_id}, filename: {file.filename}, content_type: {file.content_type}")
     
     # Verify deal exists
@@ -439,132 +424,92 @@ async def upload_rentroll(
     document = save_document_with_content(deal_id, file, content, "rent_roll", session)
     print(f"DEBUG: Saved document: {document.original_filename} -> {document.filename}")
     
-    # Parse based on file extension
-    if file.filename.endswith('.csv'):
-        try:
-            df = pd.read_csv(io.BytesIO(content))
-            print(f"DEBUG: CSV read successfully - {len(df)} rows, {len(df.columns)} columns")
-            print(f"DEBUG: CSV columns: {list(df.columns)}")
-        except Exception as e:
-            print(f"DEBUG: CSV read failed: {e}")
-            raise HTTPException(status_code=400, detail=f"Failed to read CSV file: {str(e)}")
-    elif file.filename.endswith(('.xlsx', '.xls')):
-        # Try different header positions to find the actual column headers
-        df = None
-        
-        # Determine the appropriate engine based on file extension
-        engine = 'openpyxl' if file.filename.endswith('.xlsx') else 'xlrd'
-        
-        # First, let's see what's in the first few rows
-        print(f"DEBUG: Analyzing Excel file structure with engine={engine}...")
-        for row_num in range(10):
-            try:
-                test_df = pd.read_excel(io.BytesIO(content), header=row_num, nrows=1, engine=engine)
-                print(f"DEBUG: Row {row_num} columns: {list(test_df.columns)}")
-            except Exception as e:
-                print(f"DEBUG: Failed to read row {row_num}: {e}")
-                break
-        
-        # Now try to find the best header position
-        for header_row in range(10):  # Try headers 0-9
-            try:
-                test_df = pd.read_excel(io.BytesIO(content), header=header_row, engine=engine)
-                
-                # Check if we found meaningful column names
-                meaningful_cols = []
-                for col in test_df.columns:
-                    col_str = str(col).strip()
-                    if (not col_str.startswith('Unnamed:') and 
-                        col_str not in ['', 'nan', 'NaN', 'None'] and
-                        len(col_str) > 1):
-                        meaningful_cols.append(col_str)
-                
-                print(f"DEBUG: Header {header_row}: {len(meaningful_cols)} meaningful columns: {meaningful_cols}")
-                
-                if len(meaningful_cols) >= 3:  # Need at least 3 meaningful columns
-                    df = test_df
-                    print(f"DEBUG: ✅ Using header={header_row}, found {len(meaningful_cols)} meaningful columns")
-                    print(f"DEBUG: Final columns: {list(df.columns)}")
-                    break
-                    
-            except Exception as e:
-                print(f"DEBUG: Failed to read with header={header_row}: {e}")
-                continue
-        
-        # If still no good columns found, use the original approach
-        if df is None:
-            print(f"DEBUG: ❌ No good header found, using default")
-            df = pd.read_excel(io.BytesIO(content), engine=engine)
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported file format")
+    # For now, just mark as uploaded successfully without any processing
+    document.processing_status = "uploaded"
+    session.commit()
     
-    # Use RentRollNormalizer for intelligent processing
-    from ..services.rentroll_normalization import get_rentroll_normalizer
-    normalizer = get_rentroll_normalizer(session)
+    return {
+        "success": True,
+        "message": "Rent roll file uploaded successfully",
+        "document_id": document.id,
+        "filename": document.original_filename,
+        "file_size": document.file_size,
+        "next_step": "File is ready for processing. Use the preview endpoint to see raw data."
+    }
+
+
+@router.get("/intake/rentroll/{deal_id}/preview")
+async def preview_rentroll_raw(
+    deal_id: int,
+    session: Session = Depends(get_session)
+) -> dict:
+    """Step 2: Preview raw rent roll data without any processing."""
+    
+    # Get the most recent rent roll document for this deal
+    from sqlmodel import select
+    document = session.exec(
+        select(DealDocument)
+        .where(DealDocument.deal_id == deal_id)
+        .where(DealDocument.file_type == "rent_roll")
+        .order_by(DealDocument.created_at.desc())
+    ).first()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="No rent roll document found for this deal")
     
     try:
-        print(f"DEBUG: Processing rent roll for deal {deal_id}, file: {file.filename}")
-        print(f"DEBUG: DataFrame shape: {df.shape}")
-        print(f"DEBUG: DataFrame columns: {list(df.columns)}")
+        # Read the file content
+        with open(document.file_path, 'rb') as f:
+            content = f.read()
         
-        # Normalize and analyze data
-        result = normalizer.normalize_rentroll_data(deal_id, df)
-        
-        print(f"DEBUG: Normalization result keys: {list(result.keys())}")
-        print(f"DEBUG: Normalized data count: {len(result.get('normalized_data', []))}")
-        
-        if not result.get("normalized_data"):
-            return {
-                "success": False,
-                "message": "No data could be processed from the uploaded file",
-                "error": "File appears to be empty or columns could not be mapped",
-                "debug": {
-                    "df_shape": df.shape,
-                    "df_columns": list(df.columns),
-                    "result_keys": list(result.keys()),
-                    "normalized_data_count": len(result.get("normalized_data", []))
-                }
-            }
-        
-        # Commit the data to database
-        print(f"DEBUG: Attempting to commit {len(result['normalized_data'])} units to database")
-        success = normalizer.commit_to_database(deal_id, result["normalized_data"])
-        print(f"DEBUG: Database commit result: {success}")
-        
-        if success:
-            return {
-                "success": True,
-                "message": f"Rent roll uploaded successfully! Processed {len(result['normalized_data'])} units.",
-                "units_processed": len(result["normalized_data"]),
-                "column_mapping": result["column_mapping"],
-                "validation_report": result["validation_report"],
-                "debug": {
-                    "normalized_data_count": len(result.get("normalized_data", [])),
-                    "preview_rows_count": len(result.get("preview_rows", [])),
-                    "commit_success": success
-                }
-            }
+        # Parse based on file extension
+        if document.original_filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(content))
+        elif document.original_filename.endswith(('.xlsx', '.xls')):
+            engine = 'openpyxl' if document.original_filename.endswith('.xlsx') else 'xlrd'
+            df = pd.read_excel(io.BytesIO(content), engine=engine)
         else:
-            return {
-                "success": False,
-                "message": "Failed to save data to database",
-                "error": "Database commit failed",
-                "debug": {
-                    "normalized_data_count": len(result.get("normalized_data", [])),
-                    "commit_success": success
-                }
-            }
+            raise HTTPException(status_code=400, detail="Unsupported file format")
+        
+        # Convert to JSON-serializable format
+        # Handle NaN and infinity values for JSON serialization
+        df_clean = df.head(20).copy()
+        
+        # Replace NaN and infinity values with None for JSON serialization
+        df_clean = df_clean.replace([float('inf'), float('-inf')], None)
+        df_clean = df_clean.where(pd.notnull(df_clean), None)
+        
+        preview_data = df_clean.to_dict('records')
+        
+        # Convert numpy types to Python native types
+        for record in preview_data:
+            for key, value in record.items():
+                if pd.isna(value):
+                    record[key] = None
+                elif isinstance(value, (np.integer, np.floating)):
+                    record[key] = value.item()
+                elif isinstance(value, np.ndarray):
+                    record[key] = value.tolist()
+        
+        return {
+            "success": True,
+            "message": "Raw data preview generated successfully",
+            "document_id": document.id,
+            "filename": document.original_filename,
+            "file_info": {
+                "total_rows": len(df),
+                "total_columns": len(df.columns),
+                "columns": list(df.columns),
+                "preview_rows": len(preview_data)
+            },
+            "preview_data": preview_data
+        }
         
     except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"DEBUG: Exception in rent roll upload: {str(e)}")
-        print(f"DEBUG: Traceback: {error_traceback}")
         return {
             "success": False,
-            "message": f"Error processing rent roll: {str(e)}",
-            "error": str(e),
-            "traceback": error_traceback
+            "message": f"Error reading file: {str(e)}",
+            "error": str(e)
         }
 
 
@@ -678,68 +623,6 @@ async def get_rentroll_data(
         "deal_id": deal_id,
         "units": units,
         "total_units": len(units)
-    }
-
-
-@router.get("/deals/{deal_id}/unit-mix")
-async def get_unit_mix_summary(
-    deal_id: int,
-    session: Session = Depends(get_session)
-) -> dict:
-    """Get unit mix summary for a deal."""
-    # Verify deal exists
-    deal = session.get(Deal, deal_id)
-    if not deal:
-        raise HTTPException(status_code=404, detail="Deal not found")
-    
-    # Get unit mix summary
-    unit_mix = session.exec(
-        select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
-    ).all()
-    
-    # Convert to response format
-    mix_summary = []
-    total_units = 0
-    total_actual_rent = 0
-    total_market_rent = 0
-    
-    for mix in unit_mix:
-        mix_summary.append({
-            "unit_type": mix.unit_type,
-            "unit_label": mix.unit_label,
-            "total_units": mix.total_units,
-            "occupied_units": mix.occupied_units,
-            "vacant_units": mix.vacant_units,
-            "current_avg_rent": float(mix.avg_actual_rent),
-            "t3_avg_rent": float(mix.avg_actual_rent),  # Using current rent as placeholder
-            "t6_avg_rent": float(mix.avg_actual_rent),  # Using current rent as placeholder  
-            "t12_avg_rent": float(mix.avg_actual_rent), # Using current rent as placeholder
-            "t3_rent_trend": "stable",  # Placeholder
-            "t6_rent_trend": "stable",  # Placeholder
-            "t12_rent_trend": "stable"  # Placeholder
-        })
-        
-        total_units += mix.total_units
-        total_actual_rent += float(mix.total_actual_rent)
-        total_market_rent += float(mix.total_market_rent)
-    
-    # Calculate summary stats for frontend compatibility
-    total_occupied = sum(mix.occupied_units for mix in unit_mix)
-    overall_occupancy_rate = (total_occupied / total_units * 100) if total_units > 0 else 0
-    unit_types_count = len(unit_mix)
-    
-    return {
-        "deal_id": deal_id,
-        "analysis_date": datetime.utcnow().isoformat(),
-        "unit_mix": mix_summary,
-        "summary_stats": {
-            "total_units": total_units,
-            "total_occupied": total_occupied,
-            "overall_occupancy_rate": round(overall_occupancy_rate, 1),
-            "unit_types_count": unit_types_count,
-            "analysis_periods": ["T3", "T6", "T12"],
-            "last_updated": datetime.utcnow().isoformat()
-        }
     }
 
 

@@ -40,7 +40,7 @@ export async function GET(
   } catch (error) {
     console.error('Error in Next.js API route:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch unit mix data', details: error.message },
+      { error: 'Failed to fetch unit mix data', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     )
   }

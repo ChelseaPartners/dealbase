@@ -69,12 +69,7 @@ async def run_valuation(
         select(T12Normalized).where(T12Normalized.deal_id == deal_id)
     ).all()
     
-    # Get rent roll data for unit count and rent analysis
-    rentroll_data = session.exec(
-        select(RentRollNormalized).where(RentRollNormalized.deal_id == deal_id)
-    ).all()
-    
-    # Get unit mix summary
+    # Get unit mix summary (VE should only read from UMS, not RR directly)
     unit_mix_data = session.exec(
         select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
     ).all()
@@ -87,17 +82,20 @@ async def run_valuation(
     if not t12_data:
         raise HTTPException(status_code=400, detail="No T-12 data found for deal")
     
+    if not unit_mix_data:
+        raise HTTPException(status_code=400, detail="No unit mix data found for deal. Please configure unit mix first.")
+    
     # Derive assumptions from data if not provided in request
     derived_assumptions = _derive_assumptions_from_data(
-        deal_id, t12_data, rentroll_data, unit_mix_data, rentroll_assumptions
+        deal_id, t12_data, None, unit_mix_data, rentroll_assumptions  # Remove rentroll_data
     )
     
     # Merge with request assumptions (request overrides derived)
     final_assumptions = {**derived_assumptions, **request.assumptions}
     
-    # Calculate KPIs using comprehensive data
+    # Calculate KPIs using T12 and UMS only (VE rule: no direct RR access)
     kpis = _calculate_comprehensive_kpis(
-        t12_data, rentroll_data, unit_mix_data, final_assumptions
+        t12_data, None, unit_mix_data, final_assumptions  # Remove rentroll_data
     )
     
     # Update valuation run with results
@@ -145,7 +143,7 @@ async def get_valuation_runs(
 def _derive_assumptions_from_data(
     deal_id: int, 
     t12_data: List[T12Normalized], 
-    rentroll_data: List[RentRollNormalized],
+    rentroll_data: Optional[List[RentRollNormalized]],  # Make optional
     unit_mix_data: List[UnitMixSummary],
     rentroll_assumptions: Optional[RentRollAssumptions]
 ) -> Dict[str, Any]:
@@ -158,14 +156,14 @@ def _derive_assumptions_from_data(
     annual_noi = sum(monthly_noi) / len(monthly_noi) * 12 if monthly_noi else 0
     annual_egi = sum(monthly_egi) / len(monthly_egi) * 12 if monthly_egi else 0
     
-    # Calculate unit metrics from rent roll
-    unit_count = len(rentroll_data)
-    total_square_feet = sum(unit.square_feet or 0 for unit in rentroll_data)
+    # Calculate unit metrics from unit mix summary (VE rule: use UMS only)
+    unit_count = sum(unit.total_units for unit in unit_mix_data)
+    total_square_feet = sum(unit.total_square_feet or 0 for unit in unit_mix_data)
     avg_unit_sf = total_square_feet / unit_count if unit_count > 0 else 0
     
-    # Calculate rent metrics
-    total_actual_rent = sum(unit.actual_rent for unit in rentroll_data)
-    total_market_rent = sum(unit.market_rent for unit in rentroll_data)
+    # Calculate rent metrics from unit mix summary
+    total_actual_rent = sum(unit.total_actual_rent for unit in unit_mix_data)
+    total_market_rent = sum(unit.total_market_rent for unit in unit_mix_data)
     avg_rent = total_actual_rent / unit_count if unit_count > 0 else 0
     
     # Calculate pro forma rent from assumptions or use market rent
@@ -213,11 +211,11 @@ def _derive_assumptions_from_data(
 
 def _calculate_comprehensive_kpis(
     t12_data: List[T12Normalized],
-    rentroll_data: List[RentRollNormalized], 
+    rentroll_data: Optional[List[RentRollNormalized]],  # Make optional
     unit_mix_data: List[UnitMixSummary],
     assumptions: Dict[str, Any]
 ) -> KPIs:
-    """Calculate comprehensive KPIs using all available data."""
+    """Calculate comprehensive KPIs using T12 and UMS data only (VE rule)."""
     
     # Extract key assumptions
     purchase_price = assumptions.get("purchase_price", 1000000)
@@ -232,14 +230,14 @@ def _calculate_comprehensive_kpis(
     monthly_noi = [month.net_operating_income for month in t12_data]
     annual_noi = sum(monthly_noi) / len(monthly_noi) * 12 if monthly_noi else 0
     
-    # Calculate rent metrics
-    total_actual_rent = sum(unit.actual_rent for unit in rentroll_data)
-    total_market_rent = sum(unit.market_rent for unit in rentroll_data)
+    # Calculate rent metrics from unit mix summary (VE rule: use UMS only)
+    total_actual_rent = sum(unit.total_actual_rent for unit in unit_mix_data)
+    total_market_rent = sum(unit.total_market_rent for unit in unit_mix_data)
     total_pro_forma_rent = assumptions.get("total_pro_forma_rent", total_market_rent)
     
-    # Calculate occupancy metrics
-    unit_count = len(rentroll_data)
-    occupied_units = len([unit for unit in rentroll_data if unit.lease_status == 'occupied'])
+    # Calculate occupancy metrics from unit mix summary
+    unit_count = sum(unit.total_units for unit in unit_mix_data)
+    occupied_units = sum(unit.occupied_units for unit in unit_mix_data)
     occupancy_rate = occupied_units / unit_count if unit_count > 0 else 0
     
     # Calculate cap rate

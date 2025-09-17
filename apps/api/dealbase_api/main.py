@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from .config import settings
 from .database import engine, create_db_and_tables
-from .routers import deals, health, intake, valuation, export
+from .routers import deals, health, intake, valuation, export, unit_mix
 
 app = FastAPI(
     title="DealBase API",
@@ -31,6 +31,7 @@ app.include_router(deals.router, prefix="/api", tags=["deals"])
 app.include_router(intake.router, prefix="/api", tags=["intake"])
 app.include_router(valuation.router, prefix="/api", tags=["valuation"])
 app.include_router(export.router, prefix="/api", tags=["export"])
+app.include_router(unit_mix.router, prefix="/api", tags=["unit-mix"])
 
 
 @app.get("/")
