@@ -42,7 +42,14 @@ async def intake_t12(
     if file.filename.endswith('.csv'):
         df = pd.read_csv(io.StringIO(content.decode('utf-8')))
     elif file.filename.endswith(('.xlsx', '.xls')):
+        # Try reading with header=0 first (default)
         df = pd.read_excel(io.BytesIO(content))
+        
+        # If all columns are unnamed, try reading with header=1 (skip first row)
+        if all(col.startswith('Unnamed:') for col in df.columns):
+            print(f"DEBUG: All columns unnamed, trying header=1")
+            df = pd.read_excel(io.BytesIO(content), header=1)
+            print(f"DEBUG: After header=1, columns: {list(df.columns)}")
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
@@ -136,7 +143,14 @@ async def preview_rentroll(
     if file.filename.endswith('.csv'):
         df = pd.read_csv(io.StringIO(content.decode('utf-8')))
     elif file.filename.endswith(('.xlsx', '.xls')):
+        # Try reading with header=0 first (default)
         df = pd.read_excel(io.BytesIO(content))
+        
+        # If all columns are unnamed, try reading with header=1 (skip first row)
+        if all(col.startswith('Unnamed:') for col in df.columns):
+            print(f"DEBUG: All columns unnamed, trying header=1")
+            df = pd.read_excel(io.BytesIO(content), header=1)
+            print(f"DEBUG: After header=1, columns: {list(df.columns)}")
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
@@ -187,7 +201,14 @@ async def upload_rentroll(
     if file.filename.endswith('.csv'):
         df = pd.read_csv(io.StringIO(content.decode('utf-8')))
     elif file.filename.endswith(('.xlsx', '.xls')):
+        # Try reading with header=0 first (default)
         df = pd.read_excel(io.BytesIO(content))
+        
+        # If all columns are unnamed, try reading with header=1 (skip first row)
+        if all(col.startswith('Unnamed:') for col in df.columns):
+            print(f"DEBUG: All columns unnamed, trying header=1")
+            df = pd.read_excel(io.BytesIO(content), header=1)
+            print(f"DEBUG: After header=1, columns: {list(df.columns)}")
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
