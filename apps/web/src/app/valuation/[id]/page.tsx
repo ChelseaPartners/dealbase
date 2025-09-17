@@ -7,8 +7,8 @@ import Link from 'next/link'
 import { ArrowLeft, Building2, Calculator, Play, Settings, BarChart3, Save, RotateCcw } from 'lucide-react'
 import { Deal, ValuationRun, ValuationRequest } from '@dealbase/shared'
 
-async function fetchDeal(id: string): Promise<Deal> {
-  const response = await fetch(`/api/deals/${id}`)
+async function fetchDeal(slug: string): Promise<Deal> {
+  const response = await fetch(`/api/deals/${slug}`)
   if (!response.ok) {
     throw new Error('Failed to fetch deal')
   }
@@ -48,16 +48,17 @@ const defaultAssumptions: ValuationFormData = {
 export default function ValuationPage() {
   const params = useParams()
   const router = useRouter()
-  const dealId = params.id as string
+  const dealSlug = params.id as string // This is actually the slug now
 
   const { data: deal, isLoading: dealLoading, error: dealError } = useQuery({
-    queryKey: ['deal', dealId],
-    queryFn: () => fetchDeal(dealId),
+    queryKey: ['deal', dealSlug],
+    queryFn: () => fetchDeal(dealSlug),
   })
 
   const { data: valuationRuns, isLoading: runsLoading } = useQuery({
-    queryKey: ['valuation-runs', dealId],
-    queryFn: () => fetchValuationRuns(dealId),
+    queryKey: ['valuation-runs', deal?.id],
+    queryFn: () => fetchValuationRuns(deal!.id.toString()),
+    enabled: !!deal?.id
   })
 
   const [formData, setFormData] = useState<ValuationFormData>(defaultAssumptions)
@@ -131,7 +132,7 @@ export default function ValuationPage() {
         }
       }
 
-      const response = await fetch(`/api/valuation/run/${dealId}`, {
+      const response = await fetch(`/api/valuation/run/${deal!.id}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -144,7 +145,7 @@ export default function ValuationPage() {
       }
       
       // Redirect to deal detail page to see results
-      router.push(`/deals/${dealId}`)
+      router.push(`/deals/${dealSlug}`)
     } catch (error) {
       console.error('Error running valuation:', error)
       setErrors({ submit: 'Failed to run valuation. Please try again.' })
@@ -186,7 +187,7 @@ export default function ValuationPage() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <Link
-            href={`/deals/${dealId}`}
+            href={`/deals/${dealSlug}`}
             className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
           >
             <ArrowLeft className="h-4 w-4 mr-1" />
@@ -402,7 +403,7 @@ export default function ValuationPage() {
             {/* Actions */}
             <div className="flex justify-end space-x-4">
               <Link
-                href={`/deals/${dealId}`}
+                href={`/deals/${dealSlug}`}
                 className="btn btn-secondary"
               >
                 Cancel

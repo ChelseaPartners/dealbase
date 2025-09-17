@@ -4,106 +4,291 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
-import { ArrowLeft, RefreshCw, AlertCircle, Upload } from 'lucide-react'
-import { UnitMixSummary } from '@/components/UnitMixSummary'
+import { ArrowLeft, AlertCircle } from 'lucide-react'
+import { UnitMixVisualization } from '@/components/UnitMixVisualization'
+import { UnitMixSourceSection } from '@/components/UnitMixSourceSection'
+import { UploadModal } from '@/components/UploadModal'
+import { ReLinkRentRollModal } from '@/components/ReLinkRentRollModal'
+import { UploadRentRollModal } from '@/components/UploadRentRollModal'
+import { Toast } from '@/components/Toast'
 
-interface LeaseRateAnalysis {
+interface UnitMixRow {
+  id: number
   unit_type: string
   unit_label?: string
   total_units: number
   occupied_units: number
   vacant_units: number
-  
-  // T3 Analysis (3 months)
-  t3_avg_rent: number
-  t3_units_count: number
-  t3_rent_trend: string  // "increasing", "decreasing", "stable"
-  
-  // T6 Analysis (6 months)
-  t6_avg_rent: number
-  t6_units_count: number
-  t6_rent_trend: string
-  
-  // T12 Analysis (12 months)
-  t12_avg_rent: number
-  t12_units_count: number
-  t12_rent_trend: string
-  
-  // Current vs Historical
-  current_avg_rent: number
-  rent_premium_vs_t3: number
-  rent_premium_vs_t6: number
-  rent_premium_vs_t12: number
+  avg_square_feet?: number
+  avg_bedrooms?: number
+  avg_bathrooms?: number
+  avg_actual_rent: number
+  avg_market_rent: number
+  rent_premium: number
+  pro_forma_rent?: number
+  rent_growth_rate?: number
+  total_square_feet?: number
+  total_actual_rent: number
+  total_market_rent: number
+  total_pro_forma_rent: number
 }
 
-interface MonthlyRentTrend {
-  month: number
-  year: number
-  month_name: string
-  avg_rent: number
-  total_units: number
-  occupied_units: number
-  occupancy_rate: number
-}
-
-interface ComprehensiveUnitMixAnalysis {
+interface UnitMixResponse {
   deal_id: number
-  analysis_date: string
-  unit_mix: LeaseRateAnalysis[]
-  monthly_trends: MonthlyRentTrend[]
-  summary_stats: {
+  provenance: string
+  is_linked_to_nrr: boolean
+  rent_roll_name?: string
+  last_derived_at?: string
+  last_manual_edit_at?: string
+  unit_mix: UnitMixRow[]
+  totals: {
     total_units: number
     total_occupied: number
-    overall_occupancy_rate: number
-    unit_types_count: number
-    analysis_periods: string[]
-    last_updated: string
+    total_actual_rent: number
+    total_market_rent: number
   }
 }
 
-async function fetchUnitMixData(dealId: string): Promise<ComprehensiveUnitMixAnalysis> {
-  const response = await fetch(`/api/deals/${dealId}/unit-mix`)
+interface RentRoll {
+  id: number
+  filename: string
+  uploaded_at: string
+  is_normalized: boolean
+}
+
+async function fetchUnitMixData(dealId: string): Promise<UnitMixResponse> {
+  // Bypass Next.js API route and call backend directly
+  const response = await fetch(`http://localhost:8000/api/deals/${dealId}/unit-mix`)
   if (!response.ok) {
     throw new Error('Failed to fetch unit mix data')
   }
   return response.json()
 }
 
+async function fetchAvailableRentRolls(dealId: string): Promise<RentRoll[]> {
+  const response = await fetch(`/api/deals/${dealId}/rentroll/available`)
+  if (!response.ok) {
+    throw new Error('Failed to fetch available rent rolls')
+  }
+  return response.json()
+}
+
 export default function UnitMixPage() {
   const params = useParams()
-  const dealId = params.id as string
+  const dealSlug = params.id as string // This is actually the slug now
   const queryClient = useQueryClient()
+  
+  // We need to get the deal ID for API calls, but use slug for navigation
+  const [dealId, setDealId] = useState<string | null>(null)
+  const [showRentRollModal, setShowRentRollModal] = useState(false)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [isLinking, setIsLinking] = useState(false)
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
 
-  // Fetch comprehensive unit mix data
+  // Fetch deal by slug to get the ID
+  useEffect(() => {
+    const fetchDeal = async () => {
+      try {
+        const response = await fetch(`/api/deals/${dealSlug}`)
+        if (response.ok) {
+          const deal = await response.json()
+          setDealId(deal.id.toString())
+        }
+      } catch (error) {
+        console.error('Error fetching deal:', error)
+      }
+    }
+    
+    if (dealSlug) {
+      fetchDeal()
+    }
+  }, [dealSlug])
+
+  // Fetch unit mix data
   const { 
-    data: analysisData, 
-    isLoading: analysisLoading, 
-    error: analysisError 
+    data: unitMixData, 
+    isLoading: unitMixLoading, 
+    error: unitMixError 
   } = useQuery({
-    queryKey: ['unit-mix-analysis', dealId],
-    queryFn: () => fetchUnitMixData(dealId),
+    queryKey: ['unit-mix', dealId],
+    queryFn: () => fetchUnitMixData(dealId!),
+    enabled: !!dealId
   })
 
-  if (analysisLoading) {
+  // Fetch normalized rent roll data
+  const { 
+    data: rentRollData, 
+    isLoading: rentRollLoading, 
+    error: rentRollError 
+  } = useQuery({
+    queryKey: ['rentroll', dealId],
+    queryFn: async () => {
+      const response = await fetch(`/api/deals/${dealId}/rentroll`)
+      if (!response.ok) {
+        throw new Error('Failed to fetch rent roll data')
+      }
+      return response.json()
+    },
+    enabled: !!dealId && unitMixData?.is_linked_to_nrr
+  })
+
+  // Fetch available rent rolls for re-linking
+  const { 
+    data: availableRentRolls, 
+    isLoading: rentRollsLoading 
+  } = useQuery({
+    queryKey: ['rentrolls-available', dealId],
+    queryFn: () => fetchAvailableRentRolls(dealId!),
+    enabled: showRentRollModal && !!dealId,
+  })
+
+  const handleUploadRentRoll = () => {
+    setIsUploadModalOpen(true)
+  }
+
+  const handleReLinkRentRoll = () => {
+    setShowRentRollModal(true)
+  }
+
+  const handleSelectRentRoll = async (rentRollId: number) => {
+    await handleLinkRentRoll(rentRollId)
+  }
+
+  const handleLinkRentRoll = async (rrId: number) => {
+    if (!dealId) return
+    
+    setIsLinking(true)
+    try {
+      const response = await fetch(`/api/deals/${dealId}/unitmix/link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rrId }),
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        queryClient.invalidateQueries({ queryKey: ['unit-mix', dealId] })
+        setToastMessage(result.message)
+        setShowRentRollModal(false)
+      } else {
+        throw new Error('Failed to link to rent roll')
+      }
+    } catch (error) {
+      console.error('Error linking to rent roll:', error)
+      setToastMessage('Failed to link rent roll. Please try again.')
+    } finally {
+      setIsLinking(false)
+    }
+  }
+
+  const handleUploadSuccess = async () => {
+    // After successful upload, we need to:
+    // 1. Get the uploaded document
+    // 2. Normalize it
+    // 3. Link it to unit mix
+    try {
+      // Get available rent rolls to find the newly uploaded one
+      const response = await fetch(`/api/deals/${dealId}/rentroll/available`)
+      if (response.ok) {
+        const rentRolls = await response.json()
+        // Find the most recent rent roll (should be the one just uploaded)
+        const latestRentRoll = rentRolls[0]
+        if (latestRentRoll) {
+          // Normalize the rent roll
+          const normalizeResponse = await fetch(`/api/deals/${dealId}/rentroll/${latestRentRoll.id}/normalize`, {
+            method: 'POST'
+          })
+          
+          if (normalizeResponse.ok) {
+            // Link to unit mix
+            await handleLinkRentRoll(latestRentRoll.id)
+            setToastMessage('Rent roll uploaded and linked successfully!')
+          } else {
+            setToastMessage('Rent roll uploaded but failed to normalize. Please try again.')
+          }
+        }
+      }
+      
+      // Refresh the data
+      queryClient.invalidateQueries({ queryKey: ['unit-mix', dealId] })
+      queryClient.invalidateQueries({ queryKey: ['rentroll', dealId] })
+    } catch (error) {
+      console.error('Failed to process uploaded rent roll:', error)
+      setToastMessage('Rent roll uploaded but failed to link. Please try again.')
+    }
+  }
+
+  const handleUploadSaveOnly = async () => {
+    // Just refresh the documents list to show the new upload
+    queryClient.invalidateQueries({ queryKey: ['rentrolls-available', dealId] })
+    setToastMessage('Document saved to Documents section')
+  }
+
+  const handleManualInput = async () => {
+    if (!dealId) return
+    
+    try {
+      const response = await fetch(`/api/deals/${dealId}/unit-mix/unlink`, {
+        method: 'POST',
+      })
+      
+      if (response.ok) {
+        queryClient.invalidateQueries({ queryKey: ['unit-mix', dealId] })
+        setToastMessage('Switched to manual input mode')
+      }
+    } catch (error) {
+      console.error('Failed to switch to manual mode:', error)
+    }
+  }
+
+
+  const handleEditRow = (rowId: number) => {
+    // Implement row editing logic
+    console.log('Edit row:', rowId)
+  }
+
+  const handleDeleteRow = async (rowId: number) => {
+    if (!confirm('Are you sure you want to delete this unit type?')) return
+    
+    try {
+      const response = await fetch(`/api/deals/${dealId}/unit-mix`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unit_mix_id: rowId }),
+      })
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete unit mix row')
+      }
+      
+      queryClient.invalidateQueries({ queryKey: ['unit-mix', dealId] })
+    } catch (error) {
+      console.error('Error deleting unit mix row:', error)
+    }
+  }
+
+
+  if (unitMixLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading comprehensive unit mix analysis...</p>
+          <p className="mt-4 text-gray-600">Loading unit mix data...</p>
         </div>
       </div>
     )
   }
 
-  if (analysisError) {
+  if (unitMixError) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="bg-red-50 border border-red-200 rounded-lg p-6">
             <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-red-900 mb-2">Error Loading Analysis</h3>
+            <h3 className="text-lg font-semibold text-red-900 mb-2">Error Loading Unit Mix</h3>
             <p className="text-red-700 mb-4">
-              {analysisError.message}
+              {unitMixError.message}
             </p>
             <Link href={`/deals/${dealId}`} className="btn btn-primary">
               Back to Deal
@@ -114,275 +299,99 @@ export default function UnitMixPage() {
     )
   }
 
-  if (!analysisData || analysisData.unit_mix.length === 0) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <Link
-            href={`/deals/${dealId}`}
-            className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
-          >
-            <ArrowLeft className="h-4 w-4 mr-1" />
-            Back to Deal
-          </Link>
-        </div>
-
-        <div className="text-center py-12">
-          <Upload className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Unit Mix Data</h3>
-          <p className="text-gray-600 mb-6">
-            Upload a rent roll file to generate unit mix analysis.
-          </p>
-          <Link
-            href={`/deals/${dealId}`}
-            className="btn btn-primary"
-          >
-            <Upload className="h-4 w-4 mr-2" />
-            Upload Data
-          </Link>
-        </div>
-      </div>
-    )
-  }
+  const isLinked = unitMixData?.is_linked_to_nrr || false
+  const hasData = unitMixData?.unit_mix && unitMixData.unit_mix.length > 0
+  const provenance = unitMixData?.provenance || 'MANUAL'
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header */}
       <div className="mb-8">
         <Link
-          href={`/deals/${dealId}`}
+          href={`/deals/${dealSlug}`}
           className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
         >
           <ArrowLeft className="h-4 w-4 mr-1" />
           Back to Deal
         </Link>
         <div className="mt-4">
-          <h1 className="text-3xl font-bold text-gray-900">Comprehensive Unit Mix Analysis</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Unit Mix</h1>
           <p className="mt-2 text-gray-600">
-            Detailed analysis with T3, T6, T12 lease rates and rent trends
+            Combined unit mix visualization and dataset management
           </p>
-          <div className="mt-2 text-sm text-gray-500">
-            Last updated: {new Date(analysisData.analysis_date).toLocaleDateString()}
-          </div>
         </div>
       </div>
 
-      {/* Summary Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-sm font-medium text-gray-500">Total Units</h3>
-          <p className="text-2xl font-bold text-gray-900">{analysisData.summary_stats?.total_units || 0}</p>
-        </div>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-sm font-medium text-gray-500">Occupied Units</h3>
-          <p className="text-2xl font-bold text-gray-900">{analysisData.summary_stats?.total_occupied || 0}</p>
-        </div>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-sm font-medium text-gray-500">Occupancy Rate</h3>
-          <p className="text-2xl font-bold text-gray-900">{analysisData.summary_stats?.overall_occupancy_rate || 0}%</p>
-        </div>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-sm font-medium text-gray-500">Unit Types</h3>
-          <p className="text-2xl font-bold text-gray-900">{analysisData.summary_stats?.unit_types_count || 0}</p>
-        </div>
+      {/* Combined Unit Mix Visualization */}
+      <div className="mb-8">
+        <UnitMixVisualization
+          dealId={dealId || ''}
+          unitMixData={unitMixData?.unit_mix || []}
+          totals={unitMixData?.totals || {
+            total_units: 0,
+            total_occupied: 0,
+            total_actual_rent: 0,
+            total_market_rent: 0
+          }}
+          isLinked={isLinked}
+          onEditRow={!isLinked ? handleEditRow : undefined}
+          onDeleteRow={!isLinked ? handleDeleteRow : undefined}
+        />
       </div>
 
-      {/* Comprehensive Unit Mix Analysis */}
-      <div className="space-y-8">
-        {/* Lease Rate Analysis Table */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">Lease Rate Analysis by Unit Type</h3>
-            <p className="text-sm text-gray-500">T3, T6, T12 lease rates and trends per unit type</p>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Unit Type
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Units
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Current Rent
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    T3 Avg Rent
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    T6 Avg Rent
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    T12 Avg Rent
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Trend
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {analysisData.unit_mix.map((mix) => (
-                  <tr key={mix.unit_type} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          {mix.unit_type}
-                        </div>
-                        {mix.unit_label && (
-                          <div className="text-sm text-gray-500">
-                            {mix.unit_label}
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {mix.occupied_units}/{mix.total_units}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {((mix.occupied_units / mix.total_units) * 100).toFixed(1)}% occupied
-                      </div>
-                    </td>
-                    
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm font-medium text-gray-900">
-                        ${mix.current_avg_rent.toLocaleString()}
-                      </span>
-                    </td>
-                    
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        ${mix.t3_avg_rent.toLocaleString()}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        ({mix.t3_units_count} units)
-                      </div>
-                    </td>
-                    
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        ${mix.t6_avg_rent.toLocaleString()}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        ({mix.t6_units_count} units)
-                      </div>
-                    </td>
-                    
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        ${mix.t12_avg_rent.toLocaleString()}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        ({mix.t12_units_count} units)
-                      </div>
-                    </td>
-                    
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex flex-col space-y-1">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          mix.t3_rent_trend === 'increasing' ? 'bg-green-100 text-green-800' :
-                          mix.t3_rent_trend === 'decreasing' ? 'bg-red-100 text-red-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          T3: {mix.t3_rent_trend}
-                        </span>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          mix.t6_rent_trend === 'increasing' ? 'bg-green-100 text-green-800' :
-                          mix.t6_rent_trend === 'decreasing' ? 'bg-red-100 text-red-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          T6: {mix.t6_rent_trend}
-                        </span>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          mix.t12_rent_trend === 'increasing' ? 'bg-green-100 text-green-800' :
-                          mix.t12_rent_trend === 'decreasing' ? 'bg-red-100 text-red-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          T12: {mix.t12_rent_trend}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Monthly Rent Trends */}
-        {analysisData.monthly_trends.length > 0 && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">T12 Monthly Rent Trends</h3>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Month
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Avg Rent
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Occupancy
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Units
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {analysisData.monthly_trends.map((trend, index) => (
-                    <tr key={`${trend.year}-${trend.month}`} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {trend.month_name} {trend.year}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-medium text-gray-900">
-                          ${trend.avg_rent.toLocaleString()}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <span className={`text-sm font-medium ${
-                            trend.occupancy_rate >= 95 ? 'text-green-600' :
-                            trend.occupancy_rate >= 90 ? 'text-yellow-600' :
-                            'text-red-600'
-                          }`}>
-                            {trend.occupancy_rate.toFixed(1)}%
-                          </span>
-                          <span className="ml-2 text-xs text-gray-500">
-                            ({trend.occupied_units}/{trend.total_units})
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {trend.total_units}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-        
-        <div className="flex justify-end">
-          <button 
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['unit-mix-analysis', dealId] })}
-            className="btn btn-secondary btn-sm"
-          >
-            <RefreshCw className="h-4 w-4 mr-1" />
-            Refresh Analysis
-          </button>
-        </div>
+      {/* Unit Mix Source Section */}
+      <div className="mb-8">
+        <UnitMixSourceSection
+          dealId={dealId || ''}
+          provenance={provenance}
+          isLinked={isLinked}
+          rentRollName={unitMixData?.rent_roll_name}
+          lastLinkedAt={unitMixData?.last_derived_at}
+          hasRentRollData={!!unitMixData?.rent_roll_name} // Check if rent roll is linked
+          rentRollCreatedDate={unitMixData?.last_derived_at}
+          rentRollError={undefined}
+          onUploadRentRoll={handleUploadRentRoll}
+          onReLinkRentRoll={handleReLinkRentRoll}
+          onManualInput={handleManualInput}
+          availableRentRolls={availableRentRolls}
+          onSelectRentRoll={handleSelectRentRoll}
+          showRentRollModal={showRentRollModal}
+          onCloseRentRollModal={() => setShowRentRollModal(false)}
+          normalizedRentRollData={rentRollData?.units || []}
+          totalRentRollRecords={rentRollData?.total_units || 0}
+        />
       </div>
+
+      {/* Modals */}
+      <ReLinkRentRollModal
+        isOpen={showRentRollModal}
+        onClose={() => setShowRentRollModal(false)}
+        dealId={dealId || ''}
+        onLink={handleLinkRentRoll}
+      />
+      
+      <UploadRentRollModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        dealId={dealId || ''}
+        onUploadComplete={handleUploadSuccess}
+        onUploadSaveOnly={handleUploadSaveOnly}
+      />
+      
+      <UploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        dealId={dealId || ''}
+        dealName="Deal"
+        onUploadSuccess={handleUploadSuccess}
+      />
+      
+      {/* Toast Notifications */}
+      <Toast
+        message={toastMessage}
+        type="success"
+        onClose={() => setToastMessage(null)}
+      />
     </div>
   )
 }

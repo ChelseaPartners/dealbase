@@ -160,7 +160,7 @@ export default async function DealsPage() {
                   </td>
                       <td className="px-6 py-5 whitespace-nowrap text-center">
                         <Link
-                          href={`/deals/${deal.id}`}
+                          href={`/deals/${deal.slug}`}
                           className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 shadow-sm hover:shadow-md"
                           aria-label={`View details for ${deal.name}`}
                         >

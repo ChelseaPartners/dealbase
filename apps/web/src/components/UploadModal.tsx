@@ -2,18 +2,115 @@
 
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Upload, FileText, CheckCircle, AlertCircle, Download, Trash2, X } from 'lucide-react'
+import { Upload, FileText, CheckCircle, AlertCircle, Download, Trash2, X, BarChart3, Calculator, Building2 } from 'lucide-react'
 
-interface FileUploadProps {
-  type: 't12' | 'rentroll'
-  onUpload: (file: File) => Promise<void>
-  onUploadError: (message: string) => void
-  isUploading: boolean
+// Function to detect document type based on filename and content
+const detectDocumentType = async (file: File): Promise<'t12' | 'rentroll' | 'om' | 'unknown'> => {
+  const filename = file.name.toLowerCase()
+  
+  // Check filename patterns first
+  if (filename.includes('t12') || filename.includes('t-12') || filename.includes('trailing') || filename.includes('financial')) {
+    return 't12'
+  }
+  
+  if (filename.includes('rent') || filename.includes('roll') || filename.includes('unit') || filename.includes('lease')) {
+    return 'rentroll'
+  }
+  
+  if (filename.includes('om') || filename.includes('offering') || filename.includes('memorandum')) {
+    return 'om'
+  }
+  
+  // If filename doesn't give clear indication, try to analyze content
+  try {
+    const text = await file.text()
+    const content = text.toLowerCase()
+    
+    // Check for T12 indicators
+    if (content.includes('gross rent') || content.includes('operating expenses') || content.includes('net operating income') || 
+        content.includes('month') || content.includes('year') || content.includes('noi')) {
+      return 't12'
+    }
+    
+    // Check for rent roll indicators
+    if (content.includes('unit number') || content.includes('unit type') || content.includes('actual rent') || 
+        content.includes('market rent') || content.includes('lease start') || content.includes('tenant')) {
+      return 'rentroll'
+    }
+    
+    // Check for OM indicators
+    if (content.includes('offering memorandum') || content.includes('property description') || 
+        content.includes('investment summary') || content.includes('executive summary')) {
+      return 'om'
+    }
+  } catch (error) {
+    console.warn('Could not read file content for type detection:', error)
+  }
+  
+  return 'unknown'
 }
 
-function FileUpload({ type, onUpload, onUploadError, isUploading }: FileUploadProps) {
+const getDocumentTypeInfo = (type: string) => {
+  switch (type) {
+    case 't12':
+      return {
+        title: 'T-12 Financial Data',
+        description: '12 months of trailing financial data (income, expenses, NOI)',
+        icon: Calculator,
+        color: 'text-purple-600',
+        bgColor: 'bg-purple-100'
+      }
+    case 'rentroll':
+      return {
+        title: 'Rent Roll Data',
+        description: 'Unit-level rent roll data (units, rents, lease terms)',
+        icon: Building2,
+        color: 'text-blue-600',
+        bgColor: 'bg-blue-100'
+      }
+    case 'om':
+      return {
+        title: 'Offering Memorandum',
+        description: 'Property offering memorandum and investment details',
+        icon: FileText,
+        color: 'text-green-600',
+        bgColor: 'bg-green-100'
+      }
+    default:
+      return {
+        title: 'Financial Document',
+        description: 'Upload any financial document (T-12, Rent Roll, or OM)',
+        icon: BarChart3,
+        color: 'text-gray-600',
+        bgColor: 'bg-gray-100'
+      }
+  }
+}
+
+interface UploadModalProps {
+  isOpen: boolean
+  onClose: () => void
+  dealId: string
+  dealName: string
+  onUploadSuccess?: () => void
+}
+
+export function UploadModal({ isOpen, onClose, dealId, dealName, onUploadSuccess }: UploadModalProps) {
+  const router = useRouter()
+  const [isUploading, setIsUploading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [detectedType, setDetectedType] = useState<string>('unknown')
+  const [uploadStatus, setUploadStatus] = useState<{ success: boolean; message: string } | null>(null)
+
+  // Clear all state when modal is closed
+  const handleClose = () => {
+    setUploadStatus(null)
+    setIsUploading(false)
+    setSelectedFile(null)
+    setDetectedType('unknown')
+    onClose()
+  }
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -25,164 +122,55 @@ function FileUpload({ type, onUpload, onUploadError, isUploading }: FileUploadPr
     }
   }, [])
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
     
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0]
-      if (file.type === 'text/csv' || file.name.endsWith('.csv') || file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+      if (file.type === 'text/csv' || file.name.endsWith('.csv') || file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.pdf')) {
         setSelectedFile(file)
+        const type = await detectDocumentType(file)
+        setDetectedType(type)
       }
     }
   }, [])
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0]
-      if (file.type === 'text/csv' || file.name.endsWith('.csv') || file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+      if (file.type === 'text/csv' || file.name.endsWith('.csv') || file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.pdf')) {
         setSelectedFile(file)
+        const type = await detectDocumentType(file)
+        setDetectedType(type)
       } else {
-        onUploadError('Unsupported file type. Please upload CSV or Excel files.')
+        setUploadStatus({ success: false, message: 'Unsupported file type. Please upload CSV, Excel, or PDF files.' })
       }
     }
   }
 
-  const handleUpload = async () => {
-    if (selectedFile) {
-      await onUpload(selectedFile)
-      setSelectedFile(null)
-    }
-  }
+  const handleFileUpload = async () => {
+    if (!selectedFile) return
 
-  const isT12 = type === 't12'
-  const title = isT12 ? 'T-12 Financial Data' : 'Rent Roll Data'
-  const description = isT12 
-    ? 'Upload 12 months of trailing financial data (income, expenses, NOI)'
-    : 'Upload unit-level rent roll data (units, rents, lease terms)'
-
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-          <p className="text-sm text-gray-600">{description}</p>
-        </div>
-        <FileText className="h-6 w-6 text-primary-600" />
-      </div>
-
-      <div
-        className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-          dragActive
-            ? 'border-primary-400 bg-primary-50'
-            : selectedFile
-            ? 'border-green-400 bg-green-50'
-            : 'border-gray-300 hover:border-gray-400'
-        }`}
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleDrop}
-      >
-        {selectedFile ? (
-          <div className="space-y-4">
-            <CheckCircle className="h-10 w-10 text-green-500 mx-auto" />
-            <div>
-              <p className="text-sm font-medium text-gray-900">{selectedFile.name}</p>
-              <p className="text-sm text-gray-500">
-                {(selectedFile.size / 1024).toFixed(1)} KB
-              </p>
-            </div>
-            <div className="flex justify-center space-x-3">
-              <button
-                onClick={() => setSelectedFile(null)}
-                className="btn btn-secondary btn-sm"
-              >
-                <Trash2 className="h-4 w-4 mr-1" />
-                Remove
-              </button>
-              <button
-                onClick={handleUpload}
-                disabled={isUploading}
-                className="btn btn-primary btn-sm"
-              >
-                {isUploading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Uploading...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="h-4 w-4 mr-1" />
-                    Upload
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <Upload className="h-10 w-10 text-gray-400 mx-auto" />
-            <div>
-              <p className="text-sm font-medium text-gray-900">
-                Drop your file here, or{' '}
-                <label className="text-primary-600 hover:text-primary-500 cursor-pointer">
-                  browse
-                  <input
-                    type="file"
-                    accept=".csv,.xlsx,.xls"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-                </label>
-              </p>
-              <p className="text-sm text-gray-500">CSV, XLSX files supported, max 10MB</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Sample Data Link */}
-      <div className="mt-4 text-center">
-        <a
-          href={`/api/sample/${type}`}
-          className="text-sm text-primary-600 hover:text-primary-500 flex items-center justify-center"
-        >
-          <Download className="h-4 w-4 mr-1" />
-          Download sample {isT12 ? 'T-12' : 'Rent Roll'} template
-        </a>
-      </div>
-    </div>
-  )
-}
-
-interface UploadModalProps {
-  isOpen: boolean
-  onClose: () => void
-  dealId: string
-  dealName: string
-}
-
-export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalProps) {
-  const router = useRouter()
-  const [isUploadingT12, setIsUploadingT12] = useState(false)
-  const [isUploadingRentRoll, setIsUploadingRentRoll] = useState(false)
-  const [uploadStatus, setUploadStatus] = useState<Record<string, { success: boolean; message: string }>>({})
-
-  console.log('UploadModal rendered, isOpen:', isOpen, 'dealId:', dealId, 'dealName:', dealName)
-
-  const handleFileUpload = async (type: 't12' | 'rentroll', file: File) => {
-    const setIsUploading = type === 't12' ? setIsUploadingT12 : setIsUploadingRentRoll
-    
     setIsUploading(true)
-    setUploadStatus(prev => ({ ...prev, [type]: { success: false, message: 'Uploading...' } }))
+    setUploadStatus({ success: false, message: 'Uploading...' })
 
     try {
       const formData = new FormData()
-      formData.append('file', file)
+      formData.append('file', selectedFile)
 
-      const response = await fetch(`/api/intake/${type}/${dealId}`, {
+      // Determine the correct API endpoint based on detected type
+      let endpoint = '/api/intake/rentroll' // default fallback
+      if (detectedType === 't12') {
+        endpoint = '/api/intake/t12'
+      } else if (detectedType === 'rentroll') {
+        endpoint = '/api/intake/rentroll'
+      } else if (detectedType === 'om') {
+        endpoint = '/api/intake/om' // You may need to create this endpoint
+      }
+
+      const response = await fetch(`${endpoint}/${dealId}`, {
         method: 'POST',
         body: formData,
       })
@@ -192,34 +180,32 @@ export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalPr
       }
 
       const result = await response.json()
-      console.log('Upload result:', result) // Debug the response
       
       if (result.success) {
-        setUploadStatus(prev => ({ 
-          ...prev, 
-          [type]: { success: true, message: result.message || 'Upload successful!' } 
-        }))
+        setUploadStatus({ success: true, message: result.message || 'Upload successful!' })
 
         // Close modal after successful upload and refresh page
         setTimeout(() => {
-          onClose()
-          setUploadStatus({})
-          router.refresh() // Refresh the page to show updated data
+          handleClose()
+          if (onUploadSuccess) {
+            onUploadSuccess()
+          } else {
+            router.refresh()
+          }
         }, 1500)
       } else {
-        // Handle backend error response
-        setUploadStatus(prev => ({ 
-          ...prev, 
-          [type]: { success: false, message: result.message || result.error || 'Upload failed. Please try again.' } 
-        }))
+        setUploadStatus({ 
+          success: false, 
+          message: result.message || result.error || 'Upload failed. Please try again.' 
+        })
       }
 
     } catch (error) {
       console.error('Upload error:', error)
-      setUploadStatus(prev => ({ 
-        ...prev, 
-        [type]: { success: false, message: `Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}` } 
-      }))
+      setUploadStatus({ 
+        success: false, 
+        message: `Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}` 
+      })
     } finally {
       setIsUploading(false)
     }
@@ -227,9 +213,12 @@ export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalPr
 
   if (!isOpen) return null
 
+  const typeInfo = getDocumentTypeInfo(detectedType)
+  const IconComponent = typeInfo.icon
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div>
@@ -239,76 +228,124 @@ export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalPr
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="text-gray-400 hover:text-gray-600"
           >
             <X className="h-6 w-6" />
           </button>
         </div>
 
-        {/* Upload Status Messages */}
-        {Object.entries(uploadStatus).map(([type, status]) => (
+        {/* Upload Status Message */}
+        {uploadStatus && (
           <div
-            key={type}
             className={`mx-6 mt-4 p-4 rounded-lg flex items-center ${
-              status.success
+              uploadStatus.success
                 ? 'bg-green-50 border border-green-200'
                 : 'bg-red-50 border border-red-200'
             }`}
           >
-            {status.success ? (
+            {uploadStatus.success ? (
               <CheckCircle className="h-5 w-5 text-green-500 mr-2" />
             ) : (
               <AlertCircle className="h-5 w-5 text-red-500 mr-2" />
             )}
             <span className={`text-sm font-medium ${
-              status.success ? 'text-green-800' : 'text-red-800'
+              uploadStatus.success ? 'text-green-800' : 'text-red-800'
             }`}>
-              {status.message}
+              {uploadStatus.message}
             </span>
           </div>
-        ))}
+        )}
 
-        {/* Upload Sections */}
+        {/* Upload Section */}
         <div className="p-6">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <FileUpload
-              type="t12"
-              onUpload={(file) => handleFileUpload('t12', file)}
-              onUploadError={(message) => setUploadStatus(prev => ({ ...prev, t12: { success: false, message } }))}
-              isUploading={isUploadingT12}
-            />
-            
-            <FileUpload
-              type="rentroll"
-              onUpload={(file) => handleFileUpload('rentroll', file)}
-              onUploadError={(message) => setUploadStatus(prev => ({ ...prev, rentroll: { success: false, message } }))}
-              isUploading={isUploadingRentRoll}
-            />
-          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">{typeInfo.title}</h3>
+                <p className="text-sm text-gray-600">{typeInfo.description}</p>
+              </div>
+              <div className={`w-12 h-12 ${typeInfo.bgColor} rounded-lg flex items-center justify-center`}>
+                <IconComponent className={`h-6 w-6 ${typeInfo.color}`} />
+              </div>
+            </div>
 
-          {/* Instructions */}
-          <div className="mt-6 bg-gray-50 rounded-lg p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Requirements</h3>
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-              <div>
-                <h4 className="font-medium text-gray-900 mb-2">T-12 Financial Data</h4>
-                <ul className="text-sm text-gray-600 space-y-1">
-                  <li>• 12 months of trailing data</li>
-                  <li>• Gross rent, other income, operating expenses</li>
-                  <li>• Net operating income (NOI)</li>
-                  <li>• CSV/XLSX format with month/year columns</li>
-                </ul>
-              </div>
-              <div>
-                <h4 className="font-medium text-gray-900 mb-2">Rent Roll Data</h4>
-                <ul className="text-sm text-gray-600 space-y-1">
-                  <li>• Unit-level rent information</li>
-                  <li>• Unit numbers, types, square footage</li>
-                  <li>• Current rent and market rent</li>
-                  <li>• Lease start/end dates</li>
-                </ul>
-              </div>
+            <div
+              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                dragActive
+                  ? 'border-primary-400 bg-primary-50'
+                  : selectedFile
+                  ? 'border-green-400 bg-green-50'
+                  : 'border-gray-300 hover:border-gray-400'
+              }`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+            >
+              {selectedFile ? (
+                <div className="space-y-4">
+                  <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{selectedFile.name}</p>
+                    <p className="text-sm text-gray-500">
+                      {(selectedFile.size / 1024).toFixed(1)} KB • Detected as {typeInfo.title}
+                    </p>
+                  </div>
+                  <div className="flex justify-center space-x-3">
+                    <button
+                      onClick={() => {
+                        setSelectedFile(null)
+                        setDetectedType('unknown')
+                        setUploadStatus(null)
+                      }}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Remove
+                    </button>
+                    <button
+                      onClick={handleFileUpload}
+                      disabled={isUploading}
+                      className="btn btn-primary btn-sm"
+                    >
+                      {isUploading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-1" />
+                          Upload
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <Upload className="h-12 w-12 text-gray-400 mx-auto" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">
+                      Drop your file here, or{' '}
+                      <label className="text-primary-600 hover:text-primary-500 cursor-pointer">
+                        browse
+                        <input
+                          type="file"
+                          accept=".csv,.xlsx,.xls,.pdf"
+                          onChange={handleFileSelect}
+                          className="hidden"
+                        />
+                      </label>
+                    </p>
+                    <p className="text-sm text-gray-500">CSV, XLSX, PDF files supported, max 10MB</p>
+                    <p className="text-xs text-gray-400 mt-2">
+                      Supports T-12 financials, rent rolls, and offering memorandums
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -316,7 +353,7 @@ export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalPr
         {/* Footer */}
         <div className="flex justify-end p-6 border-t border-gray-200">
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="btn btn-secondary"
           >
             Close

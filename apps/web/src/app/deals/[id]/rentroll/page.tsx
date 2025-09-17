@@ -40,8 +40,30 @@ async function fetchRentRollData(dealId: string): Promise<RentRollData> {
 
 export default function RentRollPage() {
   const params = useParams()
-  const dealId = params.id as string
+  const dealSlug = params.id as string // This is actually the slug now
   const queryClient = useQueryClient()
+  
+  // We need to get the deal ID for API calls, but use slug for navigation
+  const [dealId, setDealId] = useState<string | null>(null)
+
+  // Fetch deal by slug to get the ID
+  useEffect(() => {
+    const fetchDeal = async () => {
+      try {
+        const response = await fetch(`/api/deals/${dealSlug}`)
+        if (response.ok) {
+          const deal = await response.json()
+          setDealId(deal.id.toString())
+        }
+      } catch (error) {
+        console.error('Error fetching deal:', error)
+      }
+    }
+    
+    if (dealSlug) {
+      fetchDeal()
+    }
+  }, [dealSlug])
 
   // Fetch rent roll data
   const { 
@@ -50,7 +72,8 @@ export default function RentRollPage() {
     error: rentRollError 
   } = useQuery({
     queryKey: ['rentroll', dealId],
-    queryFn: () => fetchRentRollData(dealId),
+    queryFn: () => fetchRentRollData(dealId!),
+    enabled: !!dealId
   })
 
   if (rentRollLoading) {
@@ -74,7 +97,7 @@ export default function RentRollPage() {
             <p className="text-red-700 mb-4">
               {rentRollError.message}
             </p>
-            <Link href={`/deals/${dealId}`} className="btn btn-primary">
+            <Link href={`/deals/${dealSlug}`} className="btn btn-primary">
               Back to Deal
             </Link>
           </div>
@@ -88,7 +111,7 @@ export default function RentRollPage() {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <Link
-            href={`/deals/${dealId}`}
+            href={`/deals/${dealSlug}`}
             className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
           >
             <ArrowLeft className="h-4 w-4 mr-1" />
@@ -103,7 +126,7 @@ export default function RentRollPage() {
             Upload a rent roll file to analyze unit-level data.
           </p>
           <Link
-            href={`/deals/${dealId}`}
+            href={`/deals/${dealSlug}`}
             className="btn btn-primary"
           >
             <Upload className="h-4 w-4 mr-2" />
@@ -119,7 +142,7 @@ export default function RentRollPage() {
       {/* Header */}
       <div className="mb-8">
         <Link
-          href={`/deals/${dealId}`}
+          href={`/deals/${dealSlug}`}
           className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
         >
           <ArrowLeft className="h-4 w-4 mr-1" />

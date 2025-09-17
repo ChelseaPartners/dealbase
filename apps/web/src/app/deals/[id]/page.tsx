@@ -4,9 +4,9 @@ import { Deal } from '@/types/deal'
 import { DealDetailPageClient } from './DealDetailPageClient'
 
 // Server-side data fetching
-async function getDeal(id: string): Promise<Deal | null> {
+async function getDeal(slug: string): Promise<Deal | null> {
   try {
-    const response = await fetch(`http://localhost:8000/api/deals/${id}`, {
+    const response = await fetch(`http://localhost:8000/api/deals/${slug}`, {
       cache: 'no-store', // Always fetch fresh data
     })
     
@@ -22,10 +22,10 @@ async function getDeal(id: string): Promise<Deal | null> {
 }
 
 export default async function DealDetailPage({ params }: { params: { id: string } }) {
-  const dealId = params.id
-  const deal = await getDeal(dealId)
+  const dealSlug = params.id // This is actually the slug now
+  const deal = await getDeal(dealSlug)
   const isLoading = false
   const error = deal ? null : 'Deal not found'
 
-  return <DealDetailPageClient deal={deal} dealId={dealId} isLoading={isLoading} error={error} />
+  return <DealDetailPageClient deal={deal} dealId={deal?.id?.toString() || ''} isLoading={isLoading} error={error} />
 }

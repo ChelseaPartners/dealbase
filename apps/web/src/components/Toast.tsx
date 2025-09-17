@@ -1,84 +1,85 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { CheckCircle, XCircle, X } from 'lucide-react'
+import { useEffect } from 'react'
+import { CheckCircle, XCircle, AlertCircle, X } from 'lucide-react'
 
 interface ToastProps {
-  message: string
-  type: 'success' | 'error'
-  isVisible: boolean
+  message: string | null
+  type?: 'success' | 'error' | 'warning'
   onClose: () => void
   duration?: number
 }
 
-export default function Toast({ message, type, isVisible, onClose, duration = 5000 }: ToastProps) {
-  const [show, setShow] = useState(isVisible)
-
+export function Toast({ message, type = 'success', onClose, duration = 5000 }: ToastProps) {
   useEffect(() => {
-    setShow(isVisible)
-    
-    if (isVisible) {
+    if (message) {
       const timer = setTimeout(() => {
-        setShow(false)
-        setTimeout(onClose, 300) // Wait for animation to complete
+        onClose()
       }, duration)
-
+      
       return () => clearTimeout(timer)
     }
-  }, [isVisible, duration, onClose])
+  }, [message, onClose, duration])
 
-  if (!show) return null
+  if (!message) return null
 
-  const getTypeStyles = () => {
+  const getIcon = () => {
     switch (type) {
       case 'success':
-        return {
-          bg: 'bg-green-50',
-          border: 'border-green-200',
-          icon: 'text-green-400',
-          text: 'text-green-800',
-          iconComponent: CheckCircle
-        }
+        return <CheckCircle className="h-5 w-5 text-green-500" />
       case 'error':
-        return {
-          bg: 'bg-red-50',
-          border: 'border-red-200',
-          icon: 'text-red-400',
-          text: 'text-red-800',
-          iconComponent: XCircle
-        }
+        return <XCircle className="h-5 w-5 text-red-500" />
+      case 'warning':
+        return <AlertCircle className="h-5 w-5 text-yellow-500" />
+      default:
+        return <CheckCircle className="h-5 w-5 text-green-500" />
     }
   }
 
-  const styles = getTypeStyles()
-  const IconComponent = styles.iconComponent
+  const getBgColor = () => {
+    switch (type) {
+      case 'success':
+        return 'bg-green-50 border-green-200'
+      case 'error':
+        return 'bg-red-50 border-red-200'
+      case 'warning':
+        return 'bg-yellow-50 border-yellow-200'
+      default:
+        return 'bg-green-50 border-green-200'
+    }
+  }
+
+  const getTextColor = () => {
+    switch (type) {
+      case 'success':
+        return 'text-green-800'
+      case 'error':
+        return 'text-red-800'
+      case 'warning':
+        return 'text-yellow-800'
+      default:
+        return 'text-green-800'
+    }
+  }
 
   return (
     <div className="fixed top-4 right-4 z-50 max-w-sm w-full">
-      <div className={`${styles.bg} ${styles.border} border rounded-lg shadow-lg p-4 transform transition-all duration-300 ease-in-out ${
-        show ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
-      }`}>
-        <div className="flex items-start">
-          <div className="flex-shrink-0">
-            <IconComponent className={`h-5 w-5 ${styles.icon}`} aria-hidden="true" />
-          </div>
-          <div className="ml-3 w-0 flex-1">
-            <p className={`text-sm font-medium ${styles.text}`}>
-              {message}
-            </p>
-          </div>
-          <div className="ml-4 flex-shrink-0 flex">
-            <button
-              className={`${styles.bg} rounded-md inline-flex ${styles.text} hover:opacity-75 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`}
-              onClick={() => {
-                setShow(false)
-                setTimeout(onClose, 300)
-              }}
-            >
-              <span className="sr-only">Close</span>
-              <X className="h-4 w-4" aria-hidden="true" />
-            </button>
-          </div>
+      <div className={`flex items-center p-4 rounded-lg border ${getBgColor()} shadow-lg`}>
+        <div className="flex-shrink-0">
+          {getIcon()}
+        </div>
+        <div className="ml-3 flex-1">
+          <p className={`text-sm font-medium ${getTextColor()}`}>
+            {message}
+          </p>
+        </div>
+        <div className="ml-4 flex-shrink-0">
+          <button
+            onClick={onClose}
+            className={`inline-flex rounded-md p-1.5 ${getTextColor()} hover:opacity-75 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-green-50 focus:ring-green-600`}
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </div>
