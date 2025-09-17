@@ -1,6 +1,7 @@
 """Data intake router."""
 
 from typing import List, Dict, Any
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlmodel import Session, select
 from pydantic import BaseModel
@@ -8,7 +9,7 @@ import pandas as pd
 import io
 
 from ..database import get_session
-from ..models import Deal, T12Normalized, RentRollNormalized
+from ..models import Deal, T12Normalized, RentRollNormalized, UnitMixSummary, RentRollAssumptions
 
 router = APIRouter()
 
@@ -116,13 +117,13 @@ async def intake_t12(
     )
 
 
-@router.post("/intake/rentroll/{deal_id}")
-async def intake_rentroll(
+@router.post("/intake/rentroll/preview/{deal_id}")
+async def preview_rentroll(
     deal_id: int,
     file: UploadFile = File(...),
     session: Session = Depends(get_session)
 ) -> IntakeResponse:
-    """Intake rent roll data from CSV/Excel file."""
+    """Preview rent roll data with auto-mapping and normalization."""
     # Verify deal exists
     deal = session.get(Deal, deal_id)
     if not deal:
@@ -139,42 +140,294 @@ async def intake_rentroll(
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
-    # Basic validation and mapping
-    required_columns = ['unit_number', 'rent']
-    missing_columns = [col for col in required_columns if col not in df.columns]
+    # Use RentRollNormalizer for intelligent processing
+    from ..services.rentroll_normalization import get_rentroll_normalizer
+    normalizer = get_rentroll_normalizer(session)
     
-    if missing_columns:
+    try:
+        # Normalize and analyze data
+        result = normalizer.normalize_rentroll_data(deal_id, df)
+        
+        return IntakeResponse(
+            success=True,
+            message="Rent roll data processed and normalized successfully",
+            preview_data=result["preview_rows"],
+            mapping_report={
+                "column_mapping": result["column_mapping"],
+                "validation_report": result["validation_report"],
+                "normalized_data": result["normalized_data"]
+            }
+        )
+        
+    except Exception as e:
         return IntakeResponse(
             success=False,
-            message=f"Missing required columns: {missing_columns}",
+            message=f"Error processing rent roll: {str(e)}",
             preview_data=[],
             mapping_report={}
         )
-    
-    # Return preview and mapping report
-    # Convert numpy types to Python native types for JSON serialization
-    preview_df = df.head(10).copy()
-    for col in preview_df.columns:
-        if preview_df[col].dtype == 'int64':
-            preview_df[col] = preview_df[col].astype(int)
-        elif preview_df[col].dtype == 'float64':
-            preview_df[col] = preview_df[col].astype(float)
 
-    preview_data = preview_df.to_dict('records')
-    mapping_report = {
-        "total_units": int(len(df)),
-        "total_rent": float(df['rent'].sum()),
-        "average_rent": float(df['rent'].mean()),
-        "columns_mapped": list(df.columns),
-        "data_quality": {
-            "missing_values": {k: int(v) for k, v in df.isnull().sum().to_dict().items()},
-            "zero_rent_units": int((df['rent'] == 0).sum())
+
+@router.post("/intake/rentroll/commit/{deal_id}")
+async def commit_rentroll(
+    deal_id: int,
+    request: dict,
+    session: Session = Depends(get_session)
+) -> dict:
+    """Commit normalized rent roll data to database."""
+    # Verify deal exists
+    deal = session.get(Deal, deal_id)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    
+    try:
+        from ..services.rentroll_normalization import get_rentroll_normalizer
+        normalizer = get_rentroll_normalizer(session)
+        
+        # Get normalized data from request
+        normalized_data = request.get("normalized_data", [])
+        
+        if not normalized_data:
+            raise HTTPException(status_code=400, detail="No normalized data provided")
+        
+        # Commit to database
+        success = normalizer.commit_to_database(deal_id, normalized_data)
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"Successfully committed {len(normalized_data)} rent roll units",
+                "units_committed": len(normalized_data)
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to commit rent roll data")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error committing rent roll: {str(e)}")
+
+
+@router.get("/deals/{deal_id}/rentroll")
+async def get_rentroll_data(
+    deal_id: int,
+    session: Session = Depends(get_session)
+) -> dict:
+    """Get normalized rent roll data for a deal."""
+    # Verify deal exists
+    deal = session.get(Deal, deal_id)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    
+    # Get normalized rent roll data
+    rentroll_data = session.exec(
+        select(RentRollNormalized).where(RentRollNormalized.deal_id == deal_id)
+    ).all()
+    
+    # Convert to response format
+    units = []
+    for unit in rentroll_data:
+        units.append({
+            "id": unit.id,
+            "unit_number": unit.unit_number,
+            "unit_label": unit.unit_label,
+            "unit_type": unit.unit_type,
+            "square_feet": unit.square_feet,
+            "bedrooms": unit.bedrooms,
+            "bathrooms": unit.bathrooms,
+            "actual_rent": float(unit.actual_rent),
+            "market_rent": float(unit.market_rent),
+            "lease_start": unit.lease_start.isoformat() if unit.lease_start else None,
+            "move_in_date": unit.move_in_date.isoformat() if unit.move_in_date else None,
+            "lease_expiration": unit.lease_expiration.isoformat() if unit.lease_expiration else None,
+            "tenant_name": unit.tenant_name,
+            "lease_status": unit.lease_status
+        })
+    
+    return {
+        "deal_id": deal_id,
+        "units": units,
+        "total_units": len(units)
+    }
+
+
+@router.get("/deals/{deal_id}/unit-mix")
+async def get_unit_mix_summary(
+    deal_id: int,
+    session: Session = Depends(get_session)
+) -> dict:
+    """Get unit mix summary for a deal."""
+    # Verify deal exists
+    deal = session.get(Deal, deal_id)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    
+    # Get unit mix summary
+    unit_mix = session.exec(
+        select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
+    ).all()
+    
+    # Convert to response format
+    mix_summary = []
+    total_units = 0
+    total_actual_rent = 0
+    total_market_rent = 0
+    
+    for mix in unit_mix:
+        mix_summary.append({
+            "unit_type": mix.unit_type,
+            "unit_label": mix.unit_label,
+            "total_units": mix.total_units,
+            "occupied_units": mix.occupied_units,
+            "vacant_units": mix.vacant_units,
+            "avg_square_feet": mix.avg_square_feet,
+            "avg_bedrooms": mix.avg_bedrooms,
+            "avg_bathrooms": mix.avg_bathrooms,
+            "avg_actual_rent": float(mix.avg_actual_rent),
+            "avg_market_rent": float(mix.avg_market_rent),
+            "rent_premium": float(mix.rent_premium),
+            "pro_forma_rent": float(mix.pro_forma_rent) if mix.pro_forma_rent else None,
+            "total_square_feet": mix.total_square_feet,
+            "total_actual_rent": float(mix.total_actual_rent),
+            "total_market_rent": float(mix.total_market_rent),
+            "total_pro_forma_rent": float(mix.total_pro_forma_rent)
+        })
+        
+        total_units += mix.total_units
+        total_actual_rent += float(mix.total_actual_rent)
+        total_market_rent += float(mix.total_market_rent)
+    
+    return {
+        "deal_id": deal_id,
+        "unit_mix": mix_summary,
+        "totals": {
+            "total_units": total_units,
+            "total_actual_rent": total_actual_rent,
+            "total_market_rent": total_market_rent
         }
     }
+
+
+@router.get("/deals/{deal_id}/rentroll-assumptions")
+async def get_rentroll_assumptions(
+    deal_id: int,
+    session: Session = Depends(get_session)
+) -> dict:
+    """Get rent roll assumptions for a deal."""
+    # Verify deal exists
+    deal = session.get(Deal, deal_id)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
     
-    return IntakeResponse(
-        success=True,
-        message="Rent roll data processed successfully",
-        preview_data=preview_data,
-        mapping_report=mapping_report
-    )
+    # Get or create assumptions
+    assumptions = session.exec(
+        select(RentRollAssumptions).where(RentRollAssumptions.deal_id == deal_id)
+    ).first()
+    
+    if not assumptions:
+        # Create default assumptions
+        assumptions = RentRollAssumptions(
+            deal_id=deal_id,
+            market_rent_growth=Decimal("0.03"),
+            vacancy_rate=Decimal("0.05"),
+            turnover_rate=Decimal("0.20"),
+            avg_lease_term=12,
+            lease_renewal_rate=Decimal("0.70"),
+            marketing_cost_per_unit=Decimal("500"),
+            turnover_cost_per_unit=Decimal("2000")
+        )
+        session.add(assumptions)
+        session.commit()
+        session.refresh(assumptions)
+    
+    return {
+        "deal_id": deal_id,
+        "pro_forma_rents": {k: float(v) for k, v in assumptions.pro_forma_rents.items()},
+        "market_rent_growth": float(assumptions.market_rent_growth),
+        "vacancy_rate": float(assumptions.vacancy_rate),
+        "turnover_rate": float(assumptions.turnover_rate),
+        "avg_lease_term": assumptions.avg_lease_term,
+        "lease_renewal_rate": float(assumptions.lease_renewal_rate),
+        "marketing_cost_per_unit": float(assumptions.marketing_cost_per_unit),
+        "turnover_cost_per_unit": float(assumptions.turnover_cost_per_unit),
+        "created_at": assumptions.created_at.isoformat(),
+        "updated_at": assumptions.updated_at.isoformat()
+    }
+
+
+@router.post("/deals/{deal_id}/rentroll-assumptions")
+async def update_rentroll_assumptions(
+    deal_id: int,
+    request: dict,
+    session: Session = Depends(get_session)
+) -> dict:
+    """Update rent roll assumptions for a deal."""
+    # Verify deal exists
+    deal = session.get(Deal, deal_id)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    
+    try:
+        # Get or create assumptions
+        assumptions = session.exec(
+            select(RentRollAssumptions).where(RentRollAssumptions.deal_id == deal_id)
+        ).first()
+        
+        if not assumptions:
+            assumptions = RentRollAssumptions(deal_id=deal_id)
+            session.add(assumptions)
+        
+        # Update assumptions from request
+        if "pro_forma_rents" in request:
+            assumptions.pro_forma_rents = {
+                k: Decimal(str(v)) for k, v in request["pro_forma_rents"].items()
+            }
+        
+        if "market_rent_growth" in request:
+            assumptions.market_rent_growth = Decimal(str(request["market_rent_growth"]))
+        
+        if "vacancy_rate" in request:
+            assumptions.vacancy_rate = Decimal(str(request["vacancy_rate"]))
+        
+        if "turnover_rate" in request:
+            assumptions.turnover_rate = Decimal(str(request["turnover_rate"]))
+        
+        if "avg_lease_term" in request:
+            assumptions.avg_lease_term = int(request["avg_lease_term"])
+        
+        if "lease_renewal_rate" in request:
+            assumptions.lease_renewal_rate = Decimal(str(request["lease_renewal_rate"]))
+        
+        if "marketing_cost_per_unit" in request:
+            assumptions.marketing_cost_per_unit = Decimal(str(request["marketing_cost_per_unit"]))
+        
+        if "turnover_cost_per_unit" in request:
+            assumptions.turnover_cost_per_unit = Decimal(str(request["turnover_cost_per_unit"]))
+        
+        session.commit()
+        session.refresh(assumptions)
+        
+        # Update unit mix with pro forma rents
+        if "pro_forma_rents" in request:
+            from ..services.rentroll_normalization import get_rentroll_normalizer
+            normalizer = get_rentroll_normalizer(session)
+            normalizer._update_pro_forma_rents(deal_id, request["pro_forma_rents"])
+        
+        return {
+            "success": True,
+            "message": "Rent roll assumptions updated successfully",
+            "assumptions": {
+                "deal_id": deal_id,
+                "pro_forma_rents": {k: float(v) for k, v in assumptions.pro_forma_rents.items()},
+                "market_rent_growth": float(assumptions.market_rent_growth),
+                "vacancy_rate": float(assumptions.vacancy_rate),
+                "turnover_rate": float(assumptions.turnover_rate),
+                "avg_lease_term": assumptions.avg_lease_term,
+                "lease_renewal_rate": float(assumptions.lease_renewal_rate),
+                "marketing_cost_per_unit": float(assumptions.marketing_cost_per_unit),
+                "turnover_cost_per_unit": float(assumptions.turnover_cost_per_unit),
+                "updated_at": assumptions.updated_at.isoformat()
+            }
+        }
+        
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating assumptions: {str(e)}")

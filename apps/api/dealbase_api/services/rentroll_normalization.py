@@ -1,0 +1,436 @@
+"""Rent roll normalization and analysis services."""
+
+import pandas as pd
+from datetime import datetime
+from decimal import Decimal
+from typing import List, Dict, Any, Optional, Tuple
+from sqlmodel import Session, select
+from collections import defaultdict
+import re
+
+from ..models import Deal, RentRollNormalized, UnitMixSummary, RentRollAssumptions
+from ..utils import log_audit_event
+
+
+class RentRollNormalizer:
+    """Service for normalizing and processing rent roll data."""
+    
+    # Column mapping patterns for auto-detection
+    UNIT_NUMBER_PATTERNS = ['unit', 'apt', 'suite', 'number', 'unit_number', 'unit_num', 'unit number']
+    UNIT_TYPE_PATTERNS = ['type', 'bedroom', 'bed', 'br', 'unit_type', 'unittype', 'unit type']
+    SQUARE_FEET_PATTERNS = ['sqft', 'sf', 'square_feet', 'squareft', 'size', 'area', 'square feet']
+    BEDROOM_PATTERNS = ['bedroom', 'bed', 'br', 'bedrooms', 'beds']
+    BATHROOM_PATTERNS = ['bath', 'bathroom', 'ba', 'bathrooms']
+    ACTUAL_RENT_PATTERNS = ['rent', 'current_rent', 'actual_rent', 'in_place', 'inplace', 'current', 'current rent']
+    MARKET_RENT_PATTERNS = ['market', 'market_rent', 'proforma', 'pro_forma', 'target', 'market rent']
+    LEASE_START_PATTERNS = ['lease_start', 'start_date', 'lease_begin', 'move_in', 'movein', 'lease start']
+    LEASE_END_PATTERNS = ['lease_end', 'end_date', 'lease_exp', 'expiration', 'expire', 'lease end']
+    TENANT_PATTERNS = ['tenant', 'resident', 'name', 'tenant_name', 'occupant', 'tenant name']
+    
+    def __init__(self, session: Session):
+        self.session = session
+    
+    def normalize_rentroll_data(self, deal_id: int, df: pd.DataFrame) -> Dict[str, Any]:
+        """Normalize raw rent roll data into structured format."""
+        
+        try:
+            # Auto-detect column mappings
+            column_mapping = self._auto_detect_columns(df)
+            
+            # Normalize and clean data
+            normalized_df = self._normalize_dataframe(df, column_mapping)
+            
+            # Handle duplicates and applications
+            cleaned_df = self._handle_duplicates_and_applications(normalized_df)
+            
+            # Validate data quality
+            validation_report = self._validate_data_quality(cleaned_df)
+            
+            # Convert numpy types to Python native types for JSON serialization
+            def convert_types(obj):
+                if hasattr(obj, 'item'):  # numpy scalar
+                    return obj.item()
+                elif hasattr(obj, 'tolist'):  # numpy array
+                    return obj.tolist()
+                return obj
+            
+            # Convert the dataframes
+            normalized_records = []
+            for _, row in cleaned_df.iterrows():
+                record = {}
+                for key, value in row.items():
+                    record[key] = convert_types(value)
+                normalized_records.append(record)
+            
+            preview_records = []
+            for _, row in cleaned_df.head(10).iterrows():
+                record = {}
+                for key, value in row.items():
+                    record[key] = convert_types(value)
+                preview_records.append(record)
+            
+            return {
+                "normalized_data": normalized_records,
+                "column_mapping": column_mapping,
+                "validation_report": validation_report,
+                "preview_rows": preview_records
+            }
+        except Exception as e:
+            # Return error information for debugging
+            import traceback
+            return {
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "normalized_data": [],
+                "column_mapping": {},
+                "validation_report": {},
+                "preview_rows": []
+            }
+    
+    def _auto_detect_columns(self, df: pd.DataFrame) -> Dict[str, str]:
+        """Auto-detect column mappings using pattern matching."""
+        mapping = {}
+        columns_lower = [col.lower().strip() for col in df.columns]
+        
+        # Unit number detection
+        for pattern in self.UNIT_NUMBER_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'unit_number' not in mapping:
+                    mapping['unit_number'] = df.columns[i]
+                    break
+        
+        # Unit type detection
+        for pattern in self.UNIT_TYPE_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'unit_type' not in mapping:
+                    mapping['unit_type'] = df.columns[i]
+                    break
+        
+        # Square feet detection
+        for pattern in self.SQUARE_FEET_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'square_feet' not in mapping:
+                    mapping['square_feet'] = df.columns[i]
+                    break
+        
+        # Bedroom detection
+        for pattern in self.BEDROOM_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'bedrooms' not in mapping:
+                    mapping['bedrooms'] = df.columns[i]
+                    break
+        
+        # Bathroom detection
+        for pattern in self.BATHROOM_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'bathrooms' not in mapping:
+                    mapping['bathrooms'] = df.columns[i]
+                    break
+        
+        # Rent detection (prioritize actual/in-place rent)
+        for pattern in self.ACTUAL_RENT_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'actual_rent' not in mapping:
+                    mapping['actual_rent'] = df.columns[i]
+                    break
+        
+        # Market rent detection
+        for pattern in self.MARKET_RENT_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'market_rent' not in mapping:
+                    mapping['market_rent'] = df.columns[i]
+                    break
+        
+        # Lease start detection
+        for pattern in self.LEASE_START_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'lease_start' not in mapping:
+                    mapping['lease_start'] = df.columns[i]
+                    break
+        
+        # Lease end detection
+        for pattern in self.LEASE_END_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'lease_expiration' not in mapping:
+                    mapping['lease_expiration'] = df.columns[i]
+                    break
+        
+        # Tenant name detection
+        for pattern in self.TENANT_PATTERNS:
+            for i, col in enumerate(columns_lower):
+                if pattern in col and 'tenant_name' not in mapping:
+                    mapping['tenant_name'] = df.columns[i]
+                    break
+        
+        return mapping
+    
+    def _normalize_dataframe(self, df: pd.DataFrame, mapping: Dict[str, str]) -> pd.DataFrame:
+        """Normalize dataframe with column mappings."""
+        normalized_df = pd.DataFrame()
+        
+        # Map and normalize each field
+        if 'unit_number' in mapping:
+            normalized_df['unit_number'] = df[mapping['unit_number']].astype(str).str.strip()
+        
+        if 'unit_type' in mapping:
+            normalized_df['unit_type'] = df[mapping['unit_type']].astype(str).str.strip()
+        else:
+            # Infer unit type from other fields if available
+            normalized_df['unit_type'] = self._infer_unit_type(df, mapping)
+        
+        if 'square_feet' in mapping:
+            normalized_df['square_feet'] = pd.to_numeric(df[mapping['square_feet']], errors='coerce')
+        
+        if 'bedrooms' in mapping:
+            normalized_df['bedrooms'] = pd.to_numeric(df[mapping['bedrooms']], errors='coerce')
+        
+        if 'bathrooms' in mapping:
+            normalized_df['bathrooms'] = pd.to_numeric(df[mapping['bathrooms']], errors='coerce')
+        
+        # Rent normalization (actual rent as primary)
+        if 'actual_rent' in mapping:
+            normalized_df['actual_rent'] = pd.to_numeric(df[mapping['actual_rent']], errors='coerce').fillna(0)
+        elif 'market_rent' in mapping:
+            # Use market rent as actual if no actual rent column
+            normalized_df['actual_rent'] = pd.to_numeric(df[mapping['market_rent']], errors='coerce').fillna(0)
+        else:
+            normalized_df['actual_rent'] = 0
+        
+        if 'market_rent' in mapping:
+            normalized_df['market_rent'] = pd.to_numeric(df[mapping['market_rent']], errors='coerce').fillna(0)
+        else:
+            # Set market rent to actual rent if not provided
+            normalized_df['market_rent'] = normalized_df['actual_rent']
+        
+        # Date normalization
+        if 'lease_start' in mapping:
+            try:
+                normalized_df['lease_start'] = pd.to_datetime(df[mapping['lease_start']], errors='coerce')
+            except Exception:
+                normalized_df['lease_start'] = None
+        
+        if 'lease_expiration' in mapping:
+            try:
+                normalized_df['lease_expiration'] = pd.to_datetime(df[mapping['lease_expiration']], errors='coerce')
+            except Exception:
+                normalized_df['lease_expiration'] = None
+        
+        if 'tenant_name' in mapping:
+            normalized_df['tenant_name'] = df[mapping['tenant_name']].astype(str).str.strip()
+        
+        # Add derived fields
+        normalized_df['unit_label'] = normalized_df['unit_type']  # Default label
+        normalized_df['move_in_date'] = normalized_df.get('lease_start', None)
+        normalized_df['lease_status'] = 'occupied'
+        normalized_df['is_duplicate'] = False
+        normalized_df['is_application'] = False
+        
+        return normalized_df
+    
+    def _infer_unit_type(self, df: pd.DataFrame, mapping: Dict[str, str]) -> pd.Series:
+        """Infer unit type from bedroom count or other available data."""
+        if 'bedrooms' in mapping:
+            bedrooms = pd.to_numeric(df[mapping['bedrooms']], errors='coerce')
+            return bedrooms.apply(lambda x: f"{int(x) if pd.notna(x) else 0}BR" if pd.notna(x) else "Unknown")
+        else:
+            return pd.Series(["Unknown"] * len(df))
+    
+    def _handle_duplicates_and_applications(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Handle duplicate unit numbers and filter out applications/future move-ins."""
+        
+        # Identify duplicates based on unit number
+        df['is_duplicate'] = df.duplicated(subset=['unit_number'], keep='first')
+        
+        # Filter out applications and future move-ins
+        current_date = datetime.now()
+        df['is_application'] = (
+            (df['lease_start'] > current_date) | 
+            (df['lease_start'].isna() & df['tenant_name'].isna())
+        )
+        
+        # Keep only occupied units with actual rent (drop duplicates and applications)
+        cleaned_df = df[
+            (~df['is_duplicate']) & 
+            (~df['is_application']) & 
+            (df['actual_rent'] > 0)
+        ].copy()
+        
+        return cleaned_df
+    
+    def _validate_data_quality(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Validate data quality and generate report."""
+        total_rows = len(df)
+        
+        # Convert numpy types to Python native types
+        def to_native(value):
+            if hasattr(value, 'item'):
+                return value.item()
+            elif hasattr(value, 'tolist'):
+                return value.tolist()
+            return value
+        
+        return {
+            "total_units": to_native(total_rows),
+            "total_square_feet": to_native(df['square_feet'].sum()) if 'square_feet' in df.columns else 0,
+            "total_actual_rent": to_native(df['actual_rent'].sum()),
+            "total_market_rent": to_native(df['market_rent'].sum()),
+            "average_rent": to_native(df['actual_rent'].mean()) if total_rows > 0 else 0,
+            "data_quality": {
+                "missing_unit_numbers": to_native(df['unit_number'].isna().sum()),
+                "missing_rent": to_native((df['actual_rent'] == 0).sum()),
+                "missing_square_feet": to_native(df['square_feet'].isna().sum()) if 'square_feet' in df.columns else 0,
+                "invalid_dates": to_native(df['lease_expiration'].isna().sum()) if 'lease_expiration' in df.columns else 0,
+                "duplicate_units_removed": to_native(df['is_duplicate'].sum()),
+                "applications_removed": to_native(df['is_application'].sum())
+            },
+            "unit_type_breakdown": {str(k): to_native(v) for k, v in df['unit_type'].value_counts().to_dict().items()} if 'unit_type' in df.columns else {}
+        }
+    
+    def commit_to_database(self, deal_id: int, normalized_data: List[Dict[str, Any]]) -> bool:
+        """Commit normalized rent roll data to database."""
+        try:
+            # Clear existing rent roll data
+            existing_data = self.session.exec(
+                select(RentRollNormalized).where(RentRollNormalized.deal_id == deal_id)
+            ).all()
+            
+            for record in existing_data:
+                self.session.delete(record)
+            
+            # Insert new normalized data
+            for row in normalized_data:
+                # Parse date strings to datetime objects
+                def parse_date(date_str):
+                    if not date_str:
+                        return None
+                    if isinstance(date_str, str):
+                        try:
+                            return pd.to_datetime(date_str).to_pydatetime()
+                        except:
+                            return None
+                    return date_str
+                
+                rentroll_record = RentRollNormalized(
+                    deal_id=deal_id,
+                    unit_number=str(row.get('unit_number', '')),
+                    unit_label=row.get('unit_label'),
+                    unit_type=row.get('unit_type', 'Unknown'),
+                    square_feet=int(row['square_feet']) if pd.notna(row.get('square_feet')) else None,
+                    bedrooms=int(row['bedrooms']) if pd.notna(row.get('bedrooms')) else None,
+                    bathrooms=float(row['bathrooms']) if pd.notna(row.get('bathrooms')) else None,
+                    rent=Decimal(str(row.get('actual_rent', 0))),  # Populate old rent column
+                    actual_rent=Decimal(str(row.get('actual_rent', 0))),
+                    market_rent=Decimal(str(row.get('market_rent', 0))),
+                    lease_start=parse_date(row.get('lease_start')),
+                    move_in_date=parse_date(row.get('move_in_date')),
+                    lease_expiration=parse_date(row.get('lease_expiration')),
+                    tenant_name=row.get('tenant_name'),
+                    lease_status=row.get('lease_status', 'occupied'),
+                    is_duplicate=bool(row.get('is_duplicate', False)),
+                    is_application=bool(row.get('is_application', False)),
+                    data_source='upload'
+                )
+                self.session.add(rentroll_record)
+            
+            self.session.commit()
+            
+            # Generate unit mix summary
+            self._generate_unit_mix_summary(deal_id)
+            
+            # Log audit event
+            log_audit_event(
+                deal_id=deal_id,
+                event_type='rentroll_commit',
+                description=f'Committed {len(normalized_data)} rent roll units',
+                metadata={'units_committed': len(normalized_data)}
+            )
+            
+            return True
+            
+        except Exception as e:
+            self.session.rollback()
+            raise e
+    
+    def _generate_unit_mix_summary(self, deal_id: int):
+        """Generate unit mix summary from normalized rent roll data."""
+        
+        # Clear existing unit mix data
+        existing_summary = self.session.exec(
+            select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
+        ).all()
+        
+        for record in existing_summary:
+            self.session.delete(record)
+        
+        # Get normalized rent roll data
+        rentroll_data = self.session.exec(
+            select(RentRollNormalized).where(RentRollNormalized.deal_id == deal_id)
+        ).all()
+        
+        # Group by unit type
+        unit_type_groups = defaultdict(list)
+        for unit in rentroll_data:
+            unit_type_groups[unit.unit_type].append(unit)
+        
+        # Create unit mix summary for each type
+        for unit_type, units in unit_type_groups.items():
+            total_units = len(units)
+            occupied_units = len([u for u in units if u.lease_status == 'occupied'])
+            vacant_units = total_units - occupied_units
+            
+            # Calculate averages
+            avg_sqft = sum(u.square_feet for u in units if u.square_feet) / total_units if total_units > 0 else 0
+            avg_bedrooms = sum(u.bedrooms for u in units if u.bedrooms) / total_units if total_units > 0 else 0
+            avg_bathrooms = sum(u.bathrooms for u in units if u.bathrooms) / total_units if total_units > 0 else 0
+            avg_actual_rent = sum(u.actual_rent for u in units) / total_units if total_units > 0 else 0
+            avg_market_rent = sum(u.market_rent for u in units) / total_units if total_units > 0 else 0
+            
+            # Calculate totals
+            total_sqft = sum(u.square_feet for u in units if u.square_feet)
+            total_actual_rent = sum(u.actual_rent for u in units)
+            total_market_rent = sum(u.market_rent for u in units)
+            
+            # Rent premium (actual vs market)
+            rent_premium = avg_actual_rent - avg_market_rent if avg_market_rent > 0 else 0
+            
+            unit_mix = UnitMixSummary(
+                deal_id=deal_id,
+                unit_type=unit_type,
+                unit_label=unit_type,  # Default label
+                total_units=total_units,
+                occupied_units=occupied_units,
+                vacant_units=vacant_units,
+                avg_square_feet=int(avg_sqft) if avg_sqft else None,
+                avg_bedrooms=avg_bedrooms if avg_bedrooms else None,
+                avg_bathrooms=avg_bathrooms if avg_bathrooms else None,
+                avg_actual_rent=Decimal(str(avg_actual_rent)),
+                avg_market_rent=Decimal(str(avg_market_rent)),
+                rent_premium=Decimal(str(rent_premium)),
+                total_square_feet=int(total_sqft) if total_sqft else None,
+                total_actual_rent=Decimal(str(total_actual_rent)),
+                total_market_rent=Decimal(str(total_market_rent)),
+                total_pro_forma_rent=Decimal(str(total_market_rent))  # Default to market rent
+            )
+            
+            self.session.add(unit_mix)
+        
+        self.session.commit()
+    
+    def _update_pro_forma_rents(self, deal_id: int, pro_forma_rents: Dict[str, float]):
+        """Update pro forma rents in unit mix summary."""
+        unit_mix_data = self.session.exec(
+            select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
+        ).all()
+        
+        for unit_mix in unit_mix_data:
+            if unit_mix.unit_type in pro_forma_rents:
+                unit_mix.pro_forma_rent = Decimal(str(pro_forma_rents[unit_mix.unit_type]))
+                unit_mix.total_pro_forma_rent = unit_mix.pro_forma_rent * unit_mix.total_units
+                unit_mix.updated_at = datetime.utcnow()
+        
+        self.session.commit()
+
+
+def get_rentroll_normalizer(session: Session) -> RentRollNormalizer:
+    """Factory function to create RentRollNormalizer instance."""
+    return RentRollNormalizer(session)

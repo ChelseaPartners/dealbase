@@ -55,3 +55,14 @@ def create_deal_slug(session: Session, deal_name: str, deal_id: Optional[int] = 
     """Create a unique slug for a deal."""
     base_slug = generate_slug(deal_name)
     return ensure_unique_slug(session, base_slug, deal_id)
+
+
+def log_audit_event(deal_id: int, event_type: str, description: str, metadata: dict = None):
+    """Log audit event for compliance tracking."""
+    from .models import AuditEvent
+    
+    # This is a simplified version - in production, you'd want to inject the session
+    # For now, we'll just print the audit event
+    print(f"AUDIT EVENT: Deal {deal_id} - {event_type}: {description}")
+    if metadata:
+        print(f"  Metadata: {metadata}")
