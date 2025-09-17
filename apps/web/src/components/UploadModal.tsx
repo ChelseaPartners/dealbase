@@ -193,23 +193,32 @@ export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalPr
 
       const result = await response.json()
       console.log('Upload result:', result) // Debug the response
-      setUploadStatus(prev => ({ 
-        ...prev, 
-        [type]: { success: true, message: result.message || 'Upload successful!' } 
-      }))
+      
+      if (result.success) {
+        setUploadStatus(prev => ({ 
+          ...prev, 
+          [type]: { success: true, message: result.message || 'Upload successful!' } 
+        }))
 
-      // Close modal after successful upload and refresh page
-      setTimeout(() => {
-        onClose()
-        setUploadStatus({})
-        router.refresh() // Refresh the page to show updated data
-      }, 1500)
+        // Close modal after successful upload and refresh page
+        setTimeout(() => {
+          onClose()
+          setUploadStatus({})
+          router.refresh() // Refresh the page to show updated data
+        }, 1500)
+      } else {
+        // Handle backend error response
+        setUploadStatus(prev => ({ 
+          ...prev, 
+          [type]: { success: false, message: result.message || result.error || 'Upload failed. Please try again.' } 
+        }))
+      }
 
     } catch (error) {
       console.error('Upload error:', error)
       setUploadStatus(prev => ({ 
         ...prev, 
-        [type]: { success: false, message: 'Upload failed. Please try again.' } 
+        [type]: { success: false, message: `Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}` } 
       }))
     } finally {
       setIsUploading(false)
