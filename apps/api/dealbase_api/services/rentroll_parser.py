@@ -63,25 +63,47 @@ class RentRollParser:
             - issues_report: List of issues found during parsing
             - validation_report: Validation results
             - metadata: Provenance and processing metadata
+            - parsing_summary: Detailed summary of row filtering and processing
         """
         self.issues = []
         self.validation_errors = []
+        self.parsing_summary = {
+            'total_rows_read': 0,
+            'rows_dropped': {
+                'blank': 0,
+                'header': 0,
+                'total': 0,
+                'applicant': 0,
+                'missing_unit_number': 0,
+                'duplicate_resolved': 0
+            },
+            'duplicate_resolution_examples': [],
+            'final_unique_units': 0
+        }
         
         try:
             # Read the file
             df = self._read_file(file_path)
+            self.parsing_summary['total_rows_read'] = len(df)
             
             # Detect and map columns
             column_mapping = self._detect_columns(df)
             
+            # Filter out non-unit rows (blanks, headers, totals, applicants)
+            filtered_df = self._filter_non_unit_rows(df, column_mapping)
+            
             # Normalize the data
-            normalized_df = self._normalize_dataframe(df, column_mapping)
+            normalized_df = self._normalize_dataframe(filtered_df, column_mapping)
+            
+            # Resolve duplicates (one row per unit)
+            deduplicated_df = self._resolve_duplicates(normalized_df)
+            self.parsing_summary['final_unique_units'] = len(deduplicated_df)
             
             # Validate the data
-            validation_report = self._validate_data(normalized_df)
+            validation_report = self._validate_data(deduplicated_df)
             
             # Convert to records
-            normalized_records = self._dataframe_to_records(normalized_df)
+            normalized_records = self._dataframe_to_records(deduplicated_df)
             
             # Generate metadata
             metadata = self._generate_metadata(deal_id, file_path, column_mapping, len(normalized_records))
@@ -90,7 +112,8 @@ class RentRollParser:
                 'normalized_data': normalized_records,
                 'issues_report': self.issues,
                 'validation_report': validation_report,
-                'metadata': metadata
+                'metadata': metadata,
+                'parsing_summary': self.parsing_summary
             }
             
         except Exception as e:
@@ -101,6 +124,314 @@ class RentRollParser:
                 'severity': 'high'
             })
             raise
+    
+    def _filter_non_unit_rows(self, df: pd.DataFrame, column_mapping: Dict[str, str]) -> pd.DataFrame:
+        """
+        Filter out non-unit rows: blanks, headers, totals, applicants, and rows without valid unit numbers.
+        
+        Args:
+            df: Raw dataframe from file
+            column_mapping: Detected column mapping
+            
+        Returns:
+            Filtered dataframe containing only real unit rows
+        """
+        if df.empty:
+            return df
+            
+        # Start with all rows
+        mask = pd.Series([True] * len(df), index=df.index)
+        
+        # A) Exclude blank lines
+        blank_mask = self._identify_blank_rows(df)
+        mask = mask & ~blank_mask
+        self.parsing_summary['rows_dropped']['blank'] = blank_mask.sum()
+        
+        # B) Exclude repeated header lines
+        header_mask = self._identify_header_rows(df, column_mapping)
+        mask = mask & ~header_mask
+        self.parsing_summary['rows_dropped']['header'] = header_mask.sum()
+        
+        # C) Exclude totals/summary lines
+        total_mask = self._identify_total_rows(df, column_mapping)
+        mask = mask & ~total_mask
+        self.parsing_summary['rows_dropped']['total'] = total_mask.sum()
+        
+        # D) Exclude applicants/future rows
+        applicant_mask = self._identify_applicant_rows(df, column_mapping)
+        mask = mask & ~applicant_mask
+        self.parsing_summary['rows_dropped']['applicant'] = applicant_mask.sum()
+        
+        # E) Exclude rows without valid unit numbers
+        unit_number_mask = self._identify_invalid_unit_numbers(df, column_mapping)
+        mask = mask & ~unit_number_mask
+        self.parsing_summary['rows_dropped']['missing_unit_number'] = unit_number_mask.sum()
+        
+        # Apply the mask
+        filtered_df = df[mask].copy()
+        
+        # Log summary
+        total_dropped = len(df) - len(filtered_df)
+        self.issues.append({
+            'type': 'info',
+            'message': f"Filtered {total_dropped} non-unit rows: {self.parsing_summary['rows_dropped']}",
+            'severity': 'low'
+        })
+        
+        return filtered_df
+    
+    def _identify_blank_rows(self, df: pd.DataFrame) -> pd.Series:
+        """Identify completely blank or nearly blank rows."""
+        # Check if all values are NaN, empty strings, or whitespace
+        blank_mask = df.isnull().all(axis=1)
+        
+        # Also check for rows where all values are empty strings or whitespace
+        for col in df.columns:
+            col_str = df[col].astype(str).str.strip()
+            blank_mask = blank_mask | col_str.eq('')
+        
+        return blank_mask
+    
+    def _identify_header_rows(self, df: pd.DataFrame, column_mapping: Dict[str, str]) -> pd.Series:
+        """Identify repeated header rows based on common header patterns."""
+        # Very specific header keywords that are unlikely to appear in actual data
+        header_keywords = [
+            'unit', 'apartment', 'apt', 'suite', 'number', 'no', '#',
+            'rent', 'amount', 'price', 'lease', 'tenant', 'occupant',
+            'square', 'sqft', 'sq_ft', 'size', 'start', 'end', 'expire', 'move'
+        ]
+        
+        # Common data values that should never be considered headers
+        data_values = [
+            'occupied', 'vacant', 'applicant', 'pending', 'renewal',
+            'bedroom', 'bathroom', 'bed', 'bath', 'br', 'ba',
+            'studio', '1br', '2br', '3br', '4br', '5br',
+            '1ba', '2ba', '3ba', '4ba', '5ba'
+        ]
+        
+        header_mask = pd.Series([False] * len(df), index=df.index)
+        
+        # Only check columns that are likely to contain header-like values
+        for col in df.columns:
+            if col in df.columns:
+                col_str = df[col].astype(str).str.lower().str.strip()
+                
+                # Skip if this column is mostly numeric (not likely to be headers)
+                try:
+                    numeric_count = pd.to_numeric(col_str, errors='coerce').notna().sum()
+                    if numeric_count > len(df) * 0.8:  # If >80% numeric, skip
+                        continue
+                except:
+                    pass
+                
+                # Check if this column contains mostly header-like values
+                # But exclude common data values
+                header_like = col_str.isin(header_keywords)
+                data_like = col_str.isin(data_values)
+                
+                # Only consider it a header if it's header-like AND not data-like
+                true_header_like = header_like & ~data_like
+                
+                if true_header_like.sum() > len(df) * 0.3:  # If >30% of values are true header keywords
+                    header_mask = header_mask | true_header_like
+        
+        return header_mask
+    
+    def _identify_total_rows(self, df: pd.DataFrame, column_mapping: Dict[str, str]) -> pd.Series:
+        """Identify total/summary rows."""
+        total_keywords = ['total', 'sum', 'subtotal', 'grand total', 'summary', 'count']
+        
+        total_mask = pd.Series([False] * len(df), index=df.index)
+        
+        for col in df.columns:
+            if col in df.columns:
+                col_str = df[col].astype(str).str.lower().str.strip()
+                total_like = col_str.str.contains('|'.join(total_keywords), case=False, na=False)
+                total_mask = total_mask | total_like
+        
+        # Also check for rows that look like aggregates (many numeric columns with similar values)
+        if 'actual_rent' in column_mapping:
+            rent_col = column_mapping['actual_rent']
+            if rent_col in df.columns:
+                # Check for rows where rent values are suspiciously round or high (potential totals)
+                rent_values = pd.to_numeric(df[rent_col], errors='coerce')
+                suspicious_rent = (rent_values % 1000 == 0) & (rent_values > 10000)  # Round thousands > 10k
+                total_mask = total_mask | suspicious_rent
+        
+        return total_mask
+    
+    def _identify_applicant_rows(self, df: pd.DataFrame, column_mapping: Dict[str, str]) -> pd.Series:
+        """Identify applicant/future/pending rows."""
+        applicant_keywords = ['applicant', 'pending', 'future', 'prospective', 'waiting', 'on hold', 'renewal']
+        
+        applicant_mask = pd.Series([False] * len(df), index=df.index)
+        
+        # Check status column for applicant keywords
+        if 'lease_status' in column_mapping:
+            status_col = column_mapping['lease_status']
+            if status_col in df.columns:
+                status_str = df[status_col].astype(str).str.lower().str.strip()
+                applicant_mask = status_str.str.contains('|'.join(applicant_keywords), case=False, na=False)
+        
+        # Check for rows with zero rent (often indicates applicant/pending)
+        if 'actual_rent' in column_mapping:
+            rent_col = column_mapping['actual_rent']
+            if rent_col in df.columns:
+                rent_values = pd.to_numeric(df[rent_col], errors='coerce')
+                zero_rent = (rent_values == 0) | rent_values.isna()
+                applicant_mask = applicant_mask | zero_rent
+        
+        return applicant_mask
+    
+    def _identify_invalid_unit_numbers(self, df: pd.DataFrame, column_mapping: Dict[str, str]) -> pd.Series:
+        """Identify rows with invalid or missing unit numbers."""
+        if 'unit_number' not in column_mapping:
+            # If no unit number column detected, all rows are invalid
+            return pd.Series([True] * len(df), index=df.index)
+        
+        unit_col = column_mapping['unit_number']
+        if unit_col not in df.columns:
+            return pd.Series([True] * len(df), index=df.index)
+        
+        unit_values = df[unit_col].astype(str).str.strip()
+        
+        # Invalid unit numbers: empty, 'nan', 'none', or just whitespace
+        invalid_mask = (
+            unit_values.isin(['', 'nan', 'none', 'null', 'n/a', 'na']) |
+            unit_values.str.strip().eq('') |
+            unit_values.isna()
+        )
+        
+        return invalid_mask
+    
+    def _resolve_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Resolve duplicate unit numbers by keeping the best current record.
+        
+        Priority:
+        1. Row with real in-place rent (not 0 or NaN)
+        2. Row with lease period that includes today
+        3. Row with most recent move-in/lease start
+        """
+        if 'unit_number' not in df.columns:
+            return df
+        
+        # Group by unit number
+        grouped = df.groupby('unit_number')
+        resolved_rows = []
+        
+        for unit_num, group in grouped:
+            if len(group) == 1:
+                # No duplicates
+                resolved_rows.append(group.iloc[0])
+                continue
+            
+            # Multiple rows for same unit - apply resolution logic
+            self.parsing_summary['rows_dropped']['duplicate_resolved'] += len(group) - 1
+            
+            # Priority 1: Real in-place rent (not 0 or NaN)
+            if 'actual_rent' in group.columns:
+                rent_values = pd.to_numeric(group['actual_rent'], errors='coerce')
+                has_rent = (rent_values > 0) & rent_values.notna()
+                
+                if has_rent.any():
+                    # Keep rows with real rent
+                    candidates = group[has_rent]
+                    if len(candidates) == 1:
+                        resolved_rows.append(candidates.iloc[0])
+                        self._log_duplicate_resolution(unit_num, "has real rent", group, candidates.iloc[0])
+                        continue
+                    else:
+                        # Multiple rows with rent - check status to prefer occupied
+                        if 'lease_status' in candidates.columns:
+                            status_col = candidates['lease_status'].astype(str).str.lower()
+                            occupied_mask = status_col.str.contains('occupied', case=False, na=False)
+                            if occupied_mask.any():
+                                occupied_candidates = candidates[occupied_mask]
+                                if len(occupied_candidates) == 1:
+                                    resolved_rows.append(occupied_candidates.iloc[0])
+                                    self._log_duplicate_resolution(unit_num, "occupied with rent", group, occupied_candidates.iloc[0])
+                                    continue
+                else:
+                    # No real rent, keep all candidates for next priority
+                    candidates = group
+            else:
+                candidates = group
+            
+            # Priority 2: Lease period includes today (if we have lease dates)
+            if 'lease_start' in group.columns and 'lease_expiration' in group.columns:
+                today = pd.Timestamp.now().date()
+                current_lease = []
+                
+                for _, row in candidates.iterrows():
+                    start_date = pd.to_datetime(row['lease_start'], errors='coerce')
+                    end_date = pd.to_datetime(row['lease_expiration'], errors='coerce')
+                    
+                    if pd.notna(start_date) and pd.notna(end_date):
+                        if start_date.date() <= today <= end_date.date():
+                            current_lease.append(row)
+                
+                if current_lease:
+                    # Keep the most recent move-in date among current leases
+                    if len(current_lease) == 1:
+                        resolved_rows.append(current_lease[0])
+                        self._log_duplicate_resolution(unit_num, "current lease", group, current_lease[0])
+                        continue
+                    else:
+                        # Multiple current leases - pick most recent move-in
+                        current_df = pd.DataFrame(current_lease)
+                        if 'lease_start' in current_df.columns:
+                            current_df['lease_start_date'] = pd.to_datetime(current_df['lease_start'], errors='coerce')
+                            best_row = current_df.loc[current_df['lease_start_date'].idxmax()]
+                            resolved_rows.append(best_row)
+                            self._log_duplicate_resolution(unit_num, "most recent move-in", group, best_row)
+                            continue
+            
+            # Priority 3: Most recent move-in/lease start
+            if 'lease_start' in candidates.columns:
+                candidates['lease_start_date'] = pd.to_datetime(candidates['lease_start'], errors='coerce')
+                best_row = candidates.loc[candidates['lease_start_date'].idxmax()]
+                resolved_rows.append(best_row)
+                self._log_duplicate_resolution(unit_num, "most recent lease start", group, best_row)
+            else:
+                # No lease dates - just take the first one
+                resolved_rows.append(candidates.iloc[0])
+                self._log_duplicate_resolution(unit_num, "first occurrence", group, candidates.iloc[0])
+        
+        if resolved_rows:
+            return pd.DataFrame(resolved_rows).reset_index(drop=True)
+        else:
+            return df
+    
+    def _log_duplicate_resolution(self, unit_num: str, reason: str, all_rows: pd.DataFrame, chosen_row: pd.Series):
+        """Log duplicate resolution for diagnostics."""
+        if len(self.parsing_summary['duplicate_resolution_examples']) < 5:
+            self.parsing_summary['duplicate_resolution_examples'].append({
+                'unit_number': unit_num,
+                'total_candidates': len(all_rows),
+                'resolution_reason': reason,
+                'chosen_rent': chosen_row.get('actual_rent', 'N/A'),
+                'chosen_lease_start': chosen_row.get('lease_start', 'N/A')
+            })
+    
+    def _clean_unit_number(self, unit_str: str) -> str:
+        """Clean unit number: remove decimals, preserve leading zeros."""
+        if pd.isna(unit_str) or unit_str in ['', 'nan', 'none', 'null', 'n/a', 'na']:
+            return ''
+        
+        # Convert to string and strip whitespace
+        unit_str = str(unit_str).strip()
+        
+        # If it's a number with decimal, remove the decimal part
+        try:
+            # Try to parse as float first
+            if '.' in unit_str:
+                # Remove decimal part but preserve as string to keep leading zeros
+                unit_str = unit_str.split('.')[0]
+        except:
+            pass
+        
+        return unit_str
     
     def _read_file(self, file_path: str) -> pd.DataFrame:
         """Read the rent roll file based on its extension."""
@@ -232,9 +563,11 @@ class RentRollParser:
         """Normalize the dataframe to our schema."""
         normalized_df = pd.DataFrame()
         
-        # Unit number (required)
+        # Unit number (required) - clean and normalize
         if 'unit_number' in column_mapping:
-            normalized_df['unit_number'] = df[column_mapping['unit_number']].astype(str).str.strip()
+            unit_numbers = df[column_mapping['unit_number']].astype(str).str.strip()
+            # Clean unit numbers: remove decimals, preserve leading zeros
+            normalized_df['unit_number'] = unit_numbers.apply(self._clean_unit_number)
         else:
             # Generate unit numbers if not found
             normalized_df['unit_number'] = [f"Unit_{i+1}" for i in range(len(df))]
@@ -399,8 +732,9 @@ class RentRollParser:
             'parsed_at': datetime.utcnow().isoformat(),
             'record_count': record_count,
             'column_mapping': column_mapping,
-            'parser_version': '1.0.0',
-            'issues_count': len(self.issues)
+            'parser_version': '2.0.0',
+            'issues_count': len(self.issues),
+            'parsing_summary': self.parsing_summary
         }
     
     def persist_to_database(self, deal_id: int, normalized_records: List[Dict[str, Any]]) -> bool:
