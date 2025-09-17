@@ -168,6 +168,99 @@ async def preview_rentroll(
         )
 
 
+@router.post("/intake/rentroll/{deal_id}")
+async def upload_rentroll(
+    deal_id: int,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session)
+) -> dict:
+    """Upload and process rent roll data in one step."""
+    # Verify deal exists
+    deal = session.get(Deal, deal_id)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    
+    # Read file content
+    content = await file.read()
+    
+    # Parse based on file extension
+    if file.filename.endswith('.csv'):
+        df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+    elif file.filename.endswith(('.xlsx', '.xls')):
+        df = pd.read_excel(io.BytesIO(content))
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file format")
+    
+    # Use RentRollNormalizer for intelligent processing
+    from ..services.rentroll_normalization import get_rentroll_normalizer
+    normalizer = get_rentroll_normalizer(session)
+    
+    try:
+        print(f"DEBUG: Processing rent roll for deal {deal_id}, file: {file.filename}")
+        print(f"DEBUG: DataFrame shape: {df.shape}")
+        print(f"DEBUG: DataFrame columns: {list(df.columns)}")
+        
+        # Normalize and analyze data
+        result = normalizer.normalize_rentroll_data(deal_id, df)
+        
+        print(f"DEBUG: Normalization result keys: {list(result.keys())}")
+        print(f"DEBUG: Normalized data count: {len(result.get('normalized_data', []))}")
+        
+        if not result.get("normalized_data"):
+            return {
+                "success": False,
+                "message": "No data could be processed from the uploaded file",
+                "error": "File appears to be empty or columns could not be mapped",
+                "debug": {
+                    "df_shape": df.shape,
+                    "df_columns": list(df.columns),
+                    "result_keys": list(result.keys()),
+                    "normalized_data_count": len(result.get("normalized_data", []))
+                }
+            }
+        
+        # Commit the data to database
+        print(f"DEBUG: Attempting to commit {len(result['normalized_data'])} units to database")
+        success = normalizer.commit_to_database(deal_id, result["normalized_data"])
+        print(f"DEBUG: Database commit result: {success}")
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"Rent roll uploaded successfully! Processed {len(result['normalized_data'])} units.",
+                "units_processed": len(result["normalized_data"]),
+                "column_mapping": result["column_mapping"],
+                "validation_report": result["validation_report"],
+                "debug": {
+                    "normalized_data_count": len(result.get("normalized_data", [])),
+                    "preview_rows_count": len(result.get("preview_rows", [])),
+                    "commit_success": success
+                }
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Failed to save data to database",
+                "error": "Database commit failed",
+                "debug": {
+                    "normalized_data_count": len(result.get("normalized_data", [])),
+                    "commit_success": success
+                }
+            }
+        
+    except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"DEBUG: Exception in rent roll upload: {str(e)}")
+        print(f"DEBUG: Traceback: {error_traceback}")
+        return {
+            "success": False,
+            "message": f"Error processing rent roll: {str(e)}",
+            "error": str(e),
+            "traceback": error_traceback
+        }
+
+
 @router.post("/intake/rentroll/commit/{deal_id}")
 async def commit_rentroll(
     deal_id: int,
