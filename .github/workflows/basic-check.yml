@@ -1,0 +1,36 @@
+name: Basic Check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  basic-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install pnpm
+      uses: pnpm/action-setup@v2
+      with:
+        version: 8
+        
+    - name: Check frontend TypeScript
+      run: |
+        cd apps/web
+        pnpm install --frozen-lockfile
+        pnpm typecheck
+        
+    - name: Check frontend builds
+      run: |
+        cd apps/web
+        pnpm build
