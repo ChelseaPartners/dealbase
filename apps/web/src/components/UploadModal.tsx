@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Upload, FileText, CheckCircle, AlertCircle, Download, Trash2, X } from 'lucide-react'
 
 interface FileUploadProps {
@@ -164,6 +165,7 @@ interface UploadModalProps {
 }
 
 export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalProps) {
+  const router = useRouter()
   const [isUploadingT12, setIsUploadingT12] = useState(false)
   const [isUploadingRentRoll, setIsUploadingRentRoll] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<Record<string, { success: boolean; message: string }>>({})
@@ -190,15 +192,17 @@ export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalPr
       }
 
       const result = await response.json()
+      console.log('Upload result:', result) // Debug the response
       setUploadStatus(prev => ({ 
         ...prev, 
-        [type]: { success: true, message: 'Upload successful!' } 
+        [type]: { success: true, message: result.message || 'Upload successful!' } 
       }))
 
-      // Close modal after successful upload
+      // Close modal after successful upload and refresh page
       setTimeout(() => {
         onClose()
         setUploadStatus({})
+        router.refresh() // Refresh the page to show updated data
       }, 1500)
 
     } catch (error) {
