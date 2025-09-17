@@ -72,6 +72,93 @@ def save_document(deal_id: int, file: UploadFile, file_type: str, session: Sessi
     
     return document
 
+def save_document_with_content(deal_id: int, file: UploadFile, content: bytes, file_type: str, session: Session) -> DealDocument:
+    """Save uploaded file with provided content and create document record."""
+    
+    # Create uploads directory if it doesn't exist
+    uploads_dir = Path(__file__).parent.parent / "uploads"
+    uploads_dir.mkdir(exist_ok=True)
+    
+    # Generate unique filename
+    file_extension = Path(file.filename).suffix if file.filename else ""
+    filename = f"deal_{deal_id}_{file_type}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{file_extension}"
+    file_path = uploads_dir / filename
+    
+    # Calculate hash from provided content
+    file_hash = hashlib.md5(content).hexdigest()
+    
+    # Save file to disk
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
+    # Clear existing documents of this type for this deal
+    existing_docs = session.exec(
+        select(DealDocument).where(
+            DealDocument.deal_id == deal_id,
+            DealDocument.file_type == file_type
+        )
+    ).all()
+    
+    for doc in existing_docs:
+        # Delete the old file
+        old_file_path = Path(doc.file_path)
+        if old_file_path.exists():
+            old_file_path.unlink()
+        session.delete(doc)
+    
+    # Create new document record
+    document = DealDocument(
+        deal_id=deal_id,
+        filename=filename,
+        original_filename=file.filename or f"uploaded_file{file_extension}",
+        file_type=file_type,
+        file_size=len(content),
+        content_type=file.content_type or "application/octet-stream",
+        file_path=str(file_path),
+        file_hash=file_hash,
+        processing_status="pending"
+    )
+    
+    session.add(document)
+    session.commit()
+    session.refresh(document)
+    
+    return document
+    
+    # Clear existing documents of this type for this deal
+    existing_docs = session.exec(
+        select(DealDocument).where(
+            DealDocument.deal_id == deal_id,
+            DealDocument.file_type == file_type
+        )
+    ).all()
+    
+    for doc in existing_docs:
+        # Delete the old file
+        old_file_path = Path(doc.file_path)
+        if old_file_path.exists():
+            old_file_path.unlink()
+        session.delete(doc)
+    
+    # Create new document record
+    document = DealDocument(
+        deal_id=deal_id,
+        filename=filename,
+        original_filename=file.filename or f"uploaded_file{file_extension}",
+        file_type=file_type,
+        file_size=len(content),
+        content_type=file.content_type or "application/octet-stream",
+        file_path=str(file_path),
+        file_hash=file_hash,
+        processing_status="pending"
+    )
+    
+    session.add(document)
+    session.commit()
+    session.refresh(document)
+    
+    return document
+
 
 class IntakeResponse(BaseModel):
     """Intake response schema."""
@@ -99,7 +186,13 @@ async def intake_t12(
     
     # Parse based on file extension
     if file.filename.endswith('.csv'):
-        df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+        try:
+            df = pd.read_csv(io.BytesIO(content))
+            print(f"DEBUG: CSV read successfully - {len(df)} rows, {len(df.columns)} columns")
+            print(f"DEBUG: CSV columns: {list(df.columns)}")
+        except Exception as e:
+            print(f"DEBUG: CSV read failed: {e}")
+            raise HTTPException(status_code=400, detail=f"Failed to read CSV file: {str(e)}")
     elif file.filename.endswith(('.xlsx', '.xls')):
         # Try different header positions to find the actual column headers
         df = None
@@ -238,7 +331,13 @@ async def preview_rentroll(
     
     # Parse based on file extension
     if file.filename.endswith('.csv'):
-        df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+        try:
+            df = pd.read_csv(io.BytesIO(content))
+            print(f"DEBUG: CSV read successfully - {len(df)} rows, {len(df.columns)} columns")
+            print(f"DEBUG: CSV columns: {list(df.columns)}")
+        except Exception as e:
+            print(f"DEBUG: CSV read failed: {e}")
+            raise HTTPException(status_code=400, detail=f"Failed to read CSV file: {str(e)}")
     elif file.filename.endswith(('.xlsx', '.xls')):
         # Try different header positions to find the actual column headers
         df = None
@@ -315,7 +414,7 @@ async def preview_rentroll(
             preview_data=[],
             mapping_report={}
         )
-
+    
 
 @router.post("/intake/rentroll/{deal_id}")
 async def upload_rentroll(
@@ -324,21 +423,31 @@ async def upload_rentroll(
     session: Session = Depends(get_session)
 ) -> dict:
     """Upload and process rent roll data in one step."""
+    print(f"DEBUG: Starting upload - deal_id: {deal_id}, filename: {file.filename}, content_type: {file.content_type}")
+    
     # Verify deal exists
     deal = session.get(Deal, deal_id)
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
     
-    # Save the raw document first
-    document = save_document(deal_id, file, "rent_roll", session)
-    print(f"DEBUG: Saved document: {document.original_filename} -> {document.filename}")
-    
-    # Read file content for processing
+    # Read file content first
     content = await file.read()
+    print(f"DEBUG: File content size: {len(content)} bytes")
+    print(f"DEBUG: First 200 chars of content: {content[:200]}")
+    
+    # Save the raw document with the content
+    document = save_document_with_content(deal_id, file, content, "rent_roll", session)
+    print(f"DEBUG: Saved document: {document.original_filename} -> {document.filename}")
     
     # Parse based on file extension
     if file.filename.endswith('.csv'):
-        df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+        try:
+            df = pd.read_csv(io.BytesIO(content))
+            print(f"DEBUG: CSV read successfully - {len(df)} rows, {len(df.columns)} columns")
+            print(f"DEBUG: CSV columns: {list(df.columns)}")
+        except Exception as e:
+            print(f"DEBUG: CSV read failed: {e}")
+            raise HTTPException(status_code=400, detail=f"Failed to read CSV file: {str(e)}")
     elif file.filename.endswith(('.xlsx', '.xls')):
         # Try different header positions to find the actual column headers
         df = None
