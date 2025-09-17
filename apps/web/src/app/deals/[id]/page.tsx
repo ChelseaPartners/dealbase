@@ -6,14 +6,15 @@ import Link from 'next/link'
 import { ArrowLeft, Building2, MapPin, Calendar, Download, Upload, Calculator, Trash2 } from 'lucide-react'
 import ConfirmationDialog from '@/components/ConfirmationDialog'
 import Toast from '@/components/Toast'
+import { Deal } from '@/types/deal'
 
 export default function DealDetailPage() {
   const params = useParams()
   const router = useRouter()
   const dealId = params.id as string
-  const [deal, setDeal] = useState(null)
+  const [deal, setDeal] = useState<Deal | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState<string | null>(null)
   
   // Delete functionality state
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -41,7 +42,7 @@ export default function DealDetailPage() {
         setDeal(data)
       } catch (err) {
         console.error('Error fetching deal:', err)
-        setError(err.message)
+        setError(err instanceof Error ? err.message : 'An error occurred')
       } finally {
         setIsLoading(false)
       }
@@ -239,7 +240,7 @@ export default function DealDetailPage() {
             <div className="mt-6">
               <label className="text-sm font-medium text-gray-500">Deal Tags</label>
               <div className="mt-2 flex flex-wrap gap-2">
-                {deal.deal_tags.map((tag, index) => (
+                {deal.deal_tags.map((tag: string, index: number) => (
                   <span
                     key={index}
                     className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
