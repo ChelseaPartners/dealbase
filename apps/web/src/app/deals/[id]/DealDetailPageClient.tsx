@@ -195,6 +195,44 @@ export function DealDetailPageClient({
         </div>
       </div>
 
+      {/* Data Status */}
+      <div className="mb-8">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Data Status</h2>
+          <p className="text-sm text-gray-500 mb-6">Current status of uploaded data files</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div className="flex items-center">
+                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mr-3">
+                  <FileText className="h-4 w-4 text-blue-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">Rent Roll Data</h3>
+                  <p className="text-xs text-gray-500">Unit-level rent information</p>
+                </div>
+              </div>
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                Check Status
+              </span>
+            </div>
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div className="flex items-center">
+                <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center mr-3">
+                  <BarChart3 className="h-4 w-4 text-green-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">T-12 Financial Data</h3>
+                  <p className="text-xs text-gray-500">12-month trailing financials</p>
+                </div>
+              </div>
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                Check Status
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Simple placeholder sections */}
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2 mb-8">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
