@@ -179,13 +179,13 @@ class RentRollNormalizer:
             normalized_df['unit_type'] = self._infer_unit_type(df, mapping)
         
         if 'square_feet' in mapping:
-            normalized_df['square_feet'] = pd.to_numeric(df[mapping['square_feet']], errors='coerce')
+            normalized_df['square_feet'] = pd.to_numeric(df[mapping['square_feet']], errors='coerce').fillna(0)
         
         if 'bedrooms' in mapping:
-            normalized_df['bedrooms'] = pd.to_numeric(df[mapping['bedrooms']], errors='coerce')
+            normalized_df['bedrooms'] = pd.to_numeric(df[mapping['bedrooms']], errors='coerce').fillna(0)
         
         if 'bathrooms' in mapping:
-            normalized_df['bathrooms'] = pd.to_numeric(df[mapping['bathrooms']], errors='coerce')
+            normalized_df['bathrooms'] = pd.to_numeric(df[mapping['bathrooms']], errors='coerce').fillna(0)
         
         # Rent normalization (actual rent as primary)
         if 'actual_rent' in mapping:
@@ -310,14 +310,32 @@ class RentRollNormalizer:
                             return None
                     return date_str
                 
+                # Helper function to safely convert to int
+                def safe_int(value):
+                    if pd.isna(value) or value is None:
+                        return None
+                    try:
+                        return int(float(value))
+                    except (ValueError, TypeError):
+                        return None
+                
+                # Helper function to safely convert to float
+                def safe_float(value):
+                    if pd.isna(value) or value is None:
+                        return None
+                    try:
+                        return float(value)
+                    except (ValueError, TypeError):
+                        return None
+                
                 rentroll_record = RentRollNormalized(
                     deal_id=deal_id,
                     unit_number=str(row.get('unit_number', '')),
                     unit_label=row.get('unit_label'),
                     unit_type=row.get('unit_type', 'Unknown'),
-                    square_feet=int(row['square_feet']) if pd.notna(row.get('square_feet')) else None,
-                    bedrooms=int(row['bedrooms']) if pd.notna(row.get('bedrooms')) else None,
-                    bathrooms=float(row['bathrooms']) if pd.notna(row.get('bathrooms')) else None,
+                    square_feet=safe_int(row.get('square_feet')),
+                    bedrooms=safe_int(row.get('bedrooms')),
+                    bathrooms=safe_float(row.get('bathrooms')),
                     rent=Decimal(str(row.get('actual_rent', 0))),  # Populate old rent column
                     actual_rent=Decimal(str(row.get('actual_rent', 0))),
                     market_rent=Decimal(str(row.get('market_rent', 0))),
