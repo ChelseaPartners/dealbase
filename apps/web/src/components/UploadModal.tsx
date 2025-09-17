@@ -6,10 +6,11 @@ import { Upload, FileText, CheckCircle, AlertCircle, Download, Trash2, X } from 
 interface FileUploadProps {
   type: 't12' | 'rentroll'
   onUpload: (file: File) => Promise<void>
+  onUploadError: (message: string) => void
   isUploading: boolean
 }
 
-function FileUpload({ type, onUpload, isUploading }: FileUploadProps) {
+function FileUpload({ type, onUpload, onUploadError, isUploading }: FileUploadProps) {
   const [dragActive, setDragActive] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
@@ -38,7 +39,12 @@ function FileUpload({ type, onUpload, isUploading }: FileUploadProps) {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0])
+      const file = e.target.files[0]
+      if (file.type === 'text/csv' || file.name.endsWith('.csv') || file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        setSelectedFile(file)
+      } else {
+        onUploadError('Unsupported file type. Please upload CSV or Excel files.')
+      }
     }
   }
 
@@ -254,12 +260,14 @@ export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalPr
             <FileUpload
               type="t12"
               onUpload={(file) => handleFileUpload('t12', file)}
+              onUploadError={(message) => setUploadStatus(prev => ({ ...prev, t12: { success: false, message } }))}
               isUploading={isUploadingT12}
             />
             
             <FileUpload
               type="rentroll"
               onUpload={(file) => handleFileUpload('rentroll', file)}
+              onUploadError={(message) => setUploadStatus(prev => ({ ...prev, rentroll: { success: false, message } }))}
               isUploading={isUploadingRentRoll}
             />
           </div>
