@@ -710,30 +710,35 @@ async def get_unit_mix_summary(
             "total_units": mix.total_units,
             "occupied_units": mix.occupied_units,
             "vacant_units": mix.vacant_units,
-            "avg_square_feet": mix.avg_square_feet,
-            "avg_bedrooms": mix.avg_bedrooms,
-            "avg_bathrooms": mix.avg_bathrooms,
-            "avg_actual_rent": float(mix.avg_actual_rent),
-            "avg_market_rent": float(mix.avg_market_rent),
-            "rent_premium": float(mix.rent_premium),
-            "pro_forma_rent": float(mix.pro_forma_rent) if mix.pro_forma_rent else None,
-            "total_square_feet": mix.total_square_feet,
-            "total_actual_rent": float(mix.total_actual_rent),
-            "total_market_rent": float(mix.total_market_rent),
-            "total_pro_forma_rent": float(mix.total_pro_forma_rent)
+            "current_avg_rent": float(mix.avg_actual_rent),
+            "t3_avg_rent": float(mix.avg_actual_rent),  # Using current rent as placeholder
+            "t6_avg_rent": float(mix.avg_actual_rent),  # Using current rent as placeholder  
+            "t12_avg_rent": float(mix.avg_actual_rent), # Using current rent as placeholder
+            "t3_rent_trend": "stable",  # Placeholder
+            "t6_rent_trend": "stable",  # Placeholder
+            "t12_rent_trend": "stable"  # Placeholder
         })
         
         total_units += mix.total_units
         total_actual_rent += float(mix.total_actual_rent)
         total_market_rent += float(mix.total_market_rent)
     
+    # Calculate summary stats for frontend compatibility
+    total_occupied = sum(mix.occupied_units for mix in unit_mix)
+    overall_occupancy_rate = (total_occupied / total_units * 100) if total_units > 0 else 0
+    unit_types_count = len(unit_mix)
+    
     return {
         "deal_id": deal_id,
+        "analysis_date": datetime.utcnow().isoformat(),
         "unit_mix": mix_summary,
-        "totals": {
+        "summary_stats": {
             "total_units": total_units,
-            "total_actual_rent": total_actual_rent,
-            "total_market_rent": total_market_rent
+            "total_occupied": total_occupied,
+            "overall_occupancy_rate": round(overall_occupancy_rate, 1),
+            "unit_types_count": unit_types_count,
+            "analysis_periods": ["T3", "T6", "T12"],
+            "last_updated": datetime.utcnow().isoformat()
         }
     }
 
