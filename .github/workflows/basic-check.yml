@@ -18,19 +18,21 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
+        cache: 'npm'
         
     - name: Install pnpm
       uses: pnpm/action-setup@v2
       with:
         version: 8
         
-    - name: Check frontend TypeScript
+    - name: Install dependencies
       run: |
-        cd apps/web
-        pnpm install --frozen-lockfile
+        pnpm install
+        
+    - name: Check TypeScript
+      run: |
         pnpm typecheck
         
-    - name: Check frontend builds
+    - name: Build application
       run: |
-        cd apps/web
         pnpm build
