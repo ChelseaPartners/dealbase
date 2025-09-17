@@ -2,11 +2,11 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from .config import settings
 from .database import engine, create_db_and_tables
-from .routers import deals, health, intake, valuation, export
+from .routers import deals, health, intake, valuation, export, unit_mix
 
 app = FastAPI(
     title="DealBase API",
@@ -19,7 +19,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Next.js dev server
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],  # Next.js dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,6 +31,31 @@ app.include_router(deals.router, prefix="/api", tags=["deals"])
 app.include_router(intake.router, prefix="/api", tags=["intake"])
 app.include_router(valuation.router, prefix="/api", tags=["valuation"])
 app.include_router(export.router, prefix="/api", tags=["export"])
+app.include_router(unit_mix.router, prefix="/api", tags=["unit-mix"])
+
+
+@app.get("/")
+async def root():
+    """Root endpoint with API information and links."""
+    return {
+        "message": "DealBase CRE Valuation Engine API",
+        "version": "1.0.0",
+        "docs": "/api/docs",
+        "redoc": "/api/redoc",
+        "health": "/api/health",
+        "endpoints": {
+            "deals": "/api/deals",
+            "intake": "/api/intake",
+            "valuation": "/api/valuation",
+            "export": "/api/export"
+        }
+    }
+
+
+@app.get("/docs")
+async def redirect_docs():
+    """Redirect /docs to /api/docs for convenience."""
+    return RedirectResponse(url="/api/docs")
 
 
 @app.on_event("startup")

@@ -1,0 +1,3 @@
+Unit,Type,SqFt,Beds,Baths,Rent,Status
+101,1BR,800,1,1,1200,occupied
+102,2BR,1200,2,2,1800,vacant

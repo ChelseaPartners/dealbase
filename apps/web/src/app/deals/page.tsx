@@ -1,30 +1,49 @@
-'use client'
-
-import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { Plus, Building2, MapPin, Calendar } from 'lucide-react'
-import { Deal } from '@dealbase/shared'
+import { Plus, Building2, Eye } from 'lucide-react'
 
-async function fetchDeals(): Promise<Deal[]> {
-  const response = await fetch('/api/deals')
-  if (!response.ok) {
-    throw new Error('Failed to fetch deals')
+// Server-side data fetching
+async function getDeals() {
+  try {
+    const response = await fetch('http://localhost:8000/api/deals', {
+      cache: 'no-store', // Always fetch fresh data
+    })
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    
+    return await response.json()
+  } catch (error) {
+    console.error('Error fetching deals:', error)
+    return []
   }
-  return response.json()
 }
 
-export default function DealsPage() {
-  const { data: deals, isLoading, error } = useQuery({
-    queryKey: ['deals'],
-    queryFn: fetchDeals,
-  })
+export default async function DealsPage() {
+  const deals = await getDeals()
+  const isLoading = false
+  const error = null
+
+  // Note: This is now a server component, so we'll use Link components for navigation
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading deals...</p>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Deals Pipeline</h1>
+            <p className="mt-2 text-gray-600">Manage your commercial real estate deals</p>
+          </div>
+        </div>
+        <div className="card">
+          <div className="animate-pulse">
+            <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
+            <div className="space-y-3">
+              <div className="h-4 bg-gray-200 rounded"></div>
+              <div className="h-4 bg-gray-200 rounded"></div>
+              <div className="h-4 bg-gray-200 rounded"></div>
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -32,104 +51,129 @@ export default function DealsPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="text-center">
-          <p className="text-red-600">Error loading deals: {error.message}</p>
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Error Loading Deals</h1>
+          <p className="text-gray-600 mb-8">{error}</p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="btn btn-primary"
+          >
+            Try Again
+          </button>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <Building2 className="h-8 w-8 text-primary-600" />
-              <h1 className="ml-2 text-xl font-bold text-gray-900">DealBase</h1>
-            </div>
-            <nav className="flex space-x-8">
-              <Link href="/deals" className="text-primary-600 font-medium">
-                Deals
-              </Link>
-              <Link href="/intake" className="text-gray-700 hover:text-primary-600">
-                Intake
-              </Link>
-              <Link href="/valuation" className="text-gray-700 hover:text-primary-600">
-                Valuation
-              </Link>
-            </nav>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-center mb-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-8 mb-8 text-white">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Deals Pipeline</h1>
-            <p className="mt-2 text-gray-600">Manage your commercial real estate deals</p>
-          </div>
-          <Link
-            href="/deals/new"
-            className="btn btn-primary flex items-center"
-          >
-            <Plus className="h-5 w-5 mr-2" />
-            New Deal
-          </Link>
-        </div>
-
-        {/* Deals Grid */}
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {deals?.map((deal) => (
-            <Link
-              key={deal.id}
-              href={`/deals/${deal.id}`}
-              className="card hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900">{deal.name}</h3>
-                  <p className="text-sm text-gray-600 mt-1">{deal.property_type}</p>
-                  <div className="flex items-center mt-2 text-sm text-gray-500">
-                    <MapPin className="h-4 w-4 mr-1" />
-                    <span>{deal.city}, {deal.state}</span>
-                  </div>
-                  <div className="flex items-center mt-1 text-sm text-gray-500">
-                    <Calendar className="h-4 w-4 mr-1" />
-                    <span>{new Date(deal.created_at).toLocaleDateString()}</span>
-                  </div>
-                </div>
-                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                  deal.status === 'active' 
-                    ? 'bg-green-100 text-green-800'
-                    : deal.status === 'completed'
-                    ? 'bg-blue-100 text-blue-800'
-                    : 'bg-gray-100 text-gray-800'
-                }`}>
-                  {deal.status}
-                </span>
+            <h1 className="text-4xl font-bold mb-2">Deals Pipeline</h1>
+            <p className="text-blue-100 text-lg">Manage your commercial real estate deals</p>
+            <div className="mt-4 flex items-center space-x-4">
+              <div className="bg-white/20 rounded-lg px-3 py-1">
+                <span className="text-sm font-medium">{deals.length} Active Deals</span>
               </div>
-            </Link>
-          ))}
-        </div>
-
-        {deals?.length === 0 && (
-          <div className="text-center py-12">
-            <Building2 className="h-12 w-12 text-gray-400 mx-auto" />
-            <h3 className="mt-4 text-lg font-medium text-gray-900">No deals yet</h3>
-            <p className="mt-2 text-gray-500">Get started by creating your first deal.</p>
+              <div className="bg-white/20 rounded-lg px-3 py-1">
+                <span className="text-sm font-medium">Multifamily Focus</span>
+              </div>
+            </div>
+          </div>
+          <div className="mt-6 sm:mt-0">
             <Link
               href="/deals/new"
-              className="mt-4 btn btn-primary inline-flex items-center"
+              className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-xl text-blue-600 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-white transition-all duration-200 shadow-lg hover:shadow-xl"
             >
               <Plus className="h-5 w-5 mr-2" />
-              Create Deal
+              Create New Deal
             </Link>
           </div>
-        )}
-      </main>
+        </div>
+      </div>
+
+      <div className="card shadow-lg border-0 bg-white rounded-xl">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-100">
+            <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+              <tr>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  Property
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  Address
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  Deal Type
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  Created On
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  Created By
+                </th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-100">
+              {deals.map((deal: any) => (
+                <tr key={deal.id} className="hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 transition-all duration-200 group">
+                  <td className="px-6 py-5 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0 h-10 w-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center mr-3">
+                        <Building2 className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <span className="font-semibold text-gray-900 group-hover:text-blue-900 transition-colors">{deal.name}</span>
+                        <div className="text-xs text-gray-500 mt-1">ID: {deal.id}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-5 whitespace-nowrap">
+                    <div className="text-sm text-gray-700">
+                      {deal.address}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {deal.city}, {deal.state} {deal.zip_code}
+                    </div>
+                  </td>
+                  <td className="px-6 py-5 whitespace-nowrap">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 capitalize">
+                      {deal.property_type}
+                    </span>
+                  </td>
+                  <td className="px-6 py-5 whitespace-nowrap">
+                    <span className="text-sm text-gray-700">
+                      {new Date(deal.created_at).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit'
+                      })}
+                    </span>
+                  </td>
+                  <td className="px-6 py-5 whitespace-nowrap">
+                    <span className="text-sm text-gray-500">System</span>
+                  </td>
+                      <td className="px-6 py-5 whitespace-nowrap text-center">
+                        <Link
+                          href={`/deals/${deal.slug}`}
+                          className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 shadow-sm hover:shadow-md"
+                          aria-label={`View details for ${deal.name}`}
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View
+                        </Link>
+                      </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }

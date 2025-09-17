@@ -4,10 +4,14 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8000/api'
 
 export async function GET() {
   try {
+    console.log('Frontend API: Fetching from', `${API_BASE}/deals`)
     const response = await fetch(`${API_BASE}/deals`)
+    console.log('Frontend API: Response status', response.status)
     const data = await response.json()
+    console.log('Frontend API: Data received', data.length, 'deals')
     return NextResponse.json(data)
   } catch (error) {
+    console.error('Frontend API: Error', error)
     return NextResponse.json(
       { error: 'Failed to fetch deals' },
       { status: 500 }

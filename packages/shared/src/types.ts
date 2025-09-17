@@ -3,6 +3,7 @@
 export interface Deal {
   id: number;
   name: string;
+  slug: string;
   property_type: string;
   address: string;
   city: string;
@@ -12,16 +13,29 @@ export interface Deal {
   status: 'draft' | 'active' | 'completed' | 'archived';
   created_at: string;
   updated_at: string;
+  // Multifamily-specific fields
+  msa?: string; // Metropolitan Statistical Area
+  year_built?: number;
+  unit_count?: number; // Number of units
+  nsf?: number; // Net Square Feet
+  deal_tags?: string[]; // Array of deal tags
 }
 
 export interface DealCreate {
   name: string;
+  slug?: string; // Optional, will be generated if not provided
   property_type: string;
   address: string;
   city: string;
   state: string;
   zip_code: string;
   description?: string;
+  // Multifamily-specific fields
+  msa?: string;
+  year_built?: number;
+  unit_count?: number;
+  nsf?: number;
+  deal_tags?: string[];
 }
 
 export interface T12Data {
@@ -55,6 +69,26 @@ export interface KPIs {
   noi: number; // Net Operating Income
   cap_rate: number;
   ltv: number; // Loan-to-Value
+  // Additional metrics
+  cash_on_cash: number;
+  unlevered_irr: number;
+  levered_irr: number;
+  payback_period: number;
+  break_even_occupancy: number;
+  debt_yield: number;
+  debt_service: number;
+  total_return: number;
+  // Market metrics
+  price_per_sqft: number;
+  rent_per_sqft: number;
+  occupancy_rate: number;
+  // Risk metrics
+  dscr_minimum: number;
+  ltv_maximum: number;
+  debt_coverage_ratio: number;
+  // Additional risk factors
+  interest_rate: number;
+  vacancy_rate: number;
 }
 
 export interface ValuationRun {
@@ -107,10 +141,90 @@ export interface AuditEvent {
   created_at: string;
 }
 
+export interface ScenarioAnalysis {
+  id: number;
+  deal_id: number;
+  name: string;
+  scenarios: Scenario[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Scenario {
+  id: string;
+  name: string;
+  description?: string;
+  assumptions: ValuationRequest['assumptions'];
+  results: KPIs;
+  sensitivity_factors: SensitivityFactor[];
+}
+
+export interface SensitivityFactor {
+  variable: string;
+  base_value: number;
+  sensitivity_range: {
+    min: number;
+    max: number;
+    step: number;
+  };
+  impact_on_irr: number[];
+  impact_on_dscr: number[];
+}
+
+export interface MarketAnalysis {
+  deal_id: number;
+  comparable_properties: ComparableProperty[];
+  market_trends: MarketTrend[];
+  rent_roll_analysis: RentRollAnalysis;
+  created_at: string;
+}
+
+export interface ComparableProperty {
+  id: string;
+  name: string;
+  address: string;
+  property_type: string;
+  price_per_sqft: number;
+  cap_rate: number;
+  noi: number;
+  distance_miles: number;
+  sale_date: string;
+}
+
+export interface MarketTrend {
+  metric: string;
+  current_value: number;
+  historical_average: number;
+  trend_direction: 'up' | 'down' | 'stable';
+  confidence_level: number;
+}
+
+export interface RentRollAnalysis {
+  total_units: number;
+  occupied_units: number;
+  vacant_units: number;
+  average_rent: number;
+  market_rent: number;
+  rent_premium: number;
+  lease_expirations: LeaseExpiration[];
+  rent_growth_potential: number;
+}
+
+export interface LeaseExpiration {
+  month: number;
+  year: number;
+  units_expiring: number;
+  current_rent: number;
+  market_rent: number;
+  renewal_probability: number;
+}
+
 export interface ResultBundle {
   deal: Deal;
   valuation_runs: ValuationRun[];
   t12_data: T12Data[];
   rent_roll_data: RentRollData[];
   audit_events: AuditEvent[];
+  scenario_analysis?: ScenarioAnalysis;
+  market_analysis?: MarketAnalysis;
 }
