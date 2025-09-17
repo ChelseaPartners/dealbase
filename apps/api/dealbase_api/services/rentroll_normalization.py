@@ -125,6 +125,7 @@ class RentRollNormalizer:
             for i, col in enumerate(columns_lower):
                 if pattern in col and 'bathrooms' not in mapping:
                     mapping['bathrooms'] = df.columns[i]
+                    print(f"DEBUG: Mapped bathrooms to column: '{df.columns[i]}' (pattern: '{pattern}')")
                     break
         
         # Rent detection (prioritize actual/in-place rent)
@@ -162,6 +163,7 @@ class RentRollNormalizer:
                     mapping['tenant_name'] = df.columns[i]
                     break
         
+        print(f"DEBUG: Final column mapping: {mapping}")
         return mapping
     
     def _normalize_dataframe(self, df: pd.DataFrame, mapping: Dict[str, str]) -> pd.DataFrame:
@@ -328,6 +330,21 @@ class RentRollNormalizer:
                     except (ValueError, TypeError):
                         return None
                 
+                # Helper function to safely convert bathrooms (should be small integers)
+                def safe_bathrooms(value):
+                    if pd.isna(value) or value is None:
+                        return None
+                    try:
+                        float_val = float(value)
+                        # Bathrooms should be reasonable numbers (0-10)
+                        if 0 <= float_val <= 10:
+                            return float_val
+                        else:
+                            print(f"WARNING: Invalid bathroom value {float_val}, setting to None")
+                            return None
+                    except (ValueError, TypeError):
+                        return None
+                
                 rentroll_record = RentRollNormalized(
                     deal_id=deal_id,
                     unit_number=str(row.get('unit_number', '')),
@@ -335,7 +352,7 @@ class RentRollNormalizer:
                     unit_type=row.get('unit_type', 'Unknown'),
                     square_feet=safe_int(row.get('square_feet')),
                     bedrooms=safe_int(row.get('bedrooms')),
-                    bathrooms=safe_float(row.get('bathrooms')),
+                    bathrooms=safe_bathrooms(row.get('bathrooms')),
                     rent=Decimal(str(row.get('actual_rent', 0))),  # Populate old rent column
                     actual_rent=Decimal(str(row.get('actual_rent', 0))),
                     market_rent=Decimal(str(row.get('market_rent', 0))),
