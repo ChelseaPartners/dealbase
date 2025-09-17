@@ -103,11 +103,11 @@ export default function RentRollPage() {
             Upload a rent roll file to analyze unit-level data.
           </p>
           <Link
-            href={`/intake/${dealId}`}
+            href={`/deals/${dealId}`}
             className="btn btn-primary"
           >
             <Upload className="h-4 w-4 mr-2" />
-            Upload Rent Roll
+            Upload Data
           </Link>
         </div>
       </div>

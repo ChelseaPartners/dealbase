@@ -82,7 +82,10 @@ export function DealDetailPageClient({
           </div>
           <div className="flex space-x-3">
             <button
-              onClick={() => setIsUploadModalOpen(true)}
+              onClick={() => {
+                console.log('Upload Data button clicked!')
+                setIsUploadModalOpen(true)
+              }}
               className="btn btn-secondary flex items-center"
             >
               <Upload className="h-4 w-4 mr-2" />

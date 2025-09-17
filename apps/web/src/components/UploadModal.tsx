@@ -168,6 +168,8 @@ export function UploadModal({ isOpen, onClose, dealId, dealName }: UploadModalPr
   const [isUploadingRentRoll, setIsUploadingRentRoll] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<Record<string, { success: boolean; message: string }>>({})
 
+  console.log('UploadModal rendered, isOpen:', isOpen, 'dealId:', dealId, 'dealName:', dealName)
+
   const handleFileUpload = async (type: 't12' | 'rentroll', file: File) => {
     const setIsUploading = type === 't12' ? setIsUploadingT12 : setIsUploadingRentRoll
     
