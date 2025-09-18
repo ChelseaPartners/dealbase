@@ -18,7 +18,8 @@ class RentRollNormalizer:
     # Column mapping patterns for auto-detection
     UNIT_NUMBER_PATTERNS = ['unit', 'apt', 'suite', 'number', 'unit_number', 'unit_num', 'unit number']
     UNIT_TYPE_PATTERNS = ['type', 'bedroom', 'bed', 'br', 'unit_type', 'unittype', 'unit type']
-    UNIT_LABEL_PATTERNS = ['floorplan', 'floor_plan', 'plan', 'unit_label', 'label', 'plan_code', 'unit label', 'plan code', 'floor plan']
+    # Unit label priority order: "unit label", "floorplan", "plan", "unit type"
+    UNIT_LABEL_COLUMNS = ['unit label', 'floorplan', 'plan', 'unit type']
     SQUARE_FEET_PATTERNS = ['sqft', 'sf', 'square_feet', 'squareft', 'size', 'area', 'square feet']
     BEDROOM_PATTERNS = ['bedroom', 'bed', 'br', 'bedrooms', 'beds']
     BATHROOM_PATTERNS = ['bath', 'bathroom', 'ba', 'bathrooms']
@@ -88,6 +89,26 @@ class RentRollNormalizer:
                 "preview_rows": []
             }
     
+    def _clean_unit_label(self, value: str) -> Optional[str]:
+        """Clean and validate unit label according to mapping rules."""
+        if pd.isna(value) or value in ['', 'nan', 'NaN', 'None']:
+            return None
+        
+        # Trim whitespace and convert to uppercase
+        cleaned = str(value).strip().upper()
+        
+        # Validate: allow [A-Z0-9-_] and length <= 16
+        if len(cleaned) > 16:
+            cleaned = cleaned[:16]
+        
+        # Check if contains only allowed characters
+        if not re.match(r'^[A-Z0-9\-_]*$', cleaned):
+            # Remove invalid characters
+            cleaned = re.sub(r'[^A-Z0-9\-_]', '', cleaned)
+        
+        # Return None if empty after cleaning
+        return cleaned if cleaned else None
+
     def _auto_detect_columns(self, df: pd.DataFrame) -> Dict[str, str]:
         """Auto-detect column mappings using pattern matching."""
         mapping = {}
@@ -107,13 +128,15 @@ class RentRollNormalizer:
                     mapping['unit_type'] = df.columns[i]
                     break
         
-        # Unit label detection (floorplan, plan code, etc.)
-        for pattern in self.UNIT_LABEL_PATTERNS:
+        # Unit label detection with priority order
+        for priority_column in self.UNIT_LABEL_COLUMNS:
             for i, col in enumerate(columns_lower):
-                if pattern in col and 'unit_label' not in mapping:
+                if col == priority_column and 'unit_label' not in mapping:
                     mapping['unit_label'] = df.columns[i]
-                    print(f"DEBUG: Mapped unit_label to column: '{df.columns[i]}' (pattern: '{pattern}')")
+                    print(f"DEBUG: Mapped unit_label to column: '{df.columns[i]}' (priority: '{priority_column}')")
                     break
+            if 'unit_label' in mapping:
+                break
         
         # Square feet detection
         for pattern in self.SQUARE_FEET_PATTERNS:
@@ -189,11 +212,11 @@ class RentRollNormalizer:
             # Infer unit type from other fields if available
             normalized_df['unit_type'] = self._infer_unit_type(df, mapping)
         
-        # Unit label mapping (floorplan, plan code, etc.)
+        # Unit label mapping (floorplan, plan code, etc.) with validation
         if 'unit_label' in mapping:
-            normalized_df['unit_label'] = df[mapping['unit_label']].astype(str).str.strip()
-            # Replace empty strings and 'nan' with None
-            normalized_df['unit_label'] = normalized_df['unit_label'].replace(['', 'nan', 'NaN', 'None'], None)
+            raw_values = df[mapping['unit_label']].astype(str).str.strip()
+            # Clean and validate unit_label values
+            normalized_df['unit_label'] = raw_values.apply(self._clean_unit_label)
         else:
             # Set unit_label to None if not found
             normalized_df['unit_label'] = None
@@ -433,6 +456,17 @@ class RentRollNormalizer:
     def _generate_unit_mix_summary(self, deal_id: int):
         """Generate unit mix summary from normalized rent roll data."""
         
+        # Get the most recent rent roll document to get the filename
+        from ..models import DealDocument
+        rent_roll_doc = self.session.exec(
+            select(DealDocument)
+            .where(DealDocument.deal_id == deal_id)
+            .where(DealDocument.file_type == "rent_roll")
+            .order_by(DealDocument.created_at.desc())
+        ).first()
+        
+        rent_roll_name = rent_roll_doc.original_filename if rent_roll_doc else None
+        
         # Clear existing unit mix data
         existing_summary = self.session.exec(
             select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
@@ -488,7 +522,11 @@ class RentRollNormalizer:
                 total_square_feet=int(float(total_sqft)) if total_sqft else None,
                 total_actual_rent=Decimal(str(total_actual_rent)),
                 total_market_rent=Decimal(str(total_market_rent)),
-                total_pro_forma_rent=Decimal(str(total_market_rent))  # Default to market rent
+                total_pro_forma_rent=Decimal(str(total_market_rent)),  # Default to market rent
+                provenance="NRR",
+                is_linked_to_nrr=True,
+                rent_roll_name=rent_roll_name,
+                last_derived_at=datetime.utcnow()
             )
             
             self.session.add(unit_mix)

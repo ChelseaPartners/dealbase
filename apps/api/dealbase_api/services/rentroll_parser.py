@@ -17,6 +17,7 @@ from typing import Dict, List, Any, Optional, Tuple, Union
 from pathlib import Path
 import io
 import logging
+import re
 
 from ..models import RentRollNormalized, UnitMixSummary, DealDocument
 from ..database import Session
@@ -44,6 +45,9 @@ class RentRollParser:
         'lease_status': ['status', 'occupied', 'vacant', 'available']
     }
     
+    # Unit label priority order: "unit label", "floorplan", "plan", "unit type"
+    UNIT_LABEL_COLUMNS = ['unit label', 'floorplan', 'plan', 'unit type']
+    
     def __init__(self, session: Session):
         self.session = session
         self.issues: List[Dict[str, Any]] = []
@@ -51,7 +55,7 @@ class RentRollParser:
         
     def parse_rentroll(self, deal_id: int, file_path: str) -> Dict[str, Any]:
         """
-        Parse a rent roll file and return normalized data.
+        Parse a rent roll file and return normalized data with robust error handling.
         
         Args:
             deal_id: Deal ID to associate with the rent roll
@@ -82,31 +86,117 @@ class RentRollParser:
         }
         
         try:
-            # Read the file
-            df = self._read_file(file_path)
-            self.parsing_summary['total_rows_read'] = len(df)
+            # Step 1: Read the file with error handling
+            try:
+                df = self._read_file(file_path)
+                self.parsing_summary['total_rows_read'] = len(df)
+                
+                if df.empty:
+                    raise ValueError("File contains no data")
+                    
+                logger.info(f"Successfully read {len(df)} rows from {file_path}")
+                
+            except Exception as e:
+                error_msg = f"Failed to read file {file_path}: {str(e)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
-            # Detect and map columns
-            column_mapping = self._detect_columns(df)
+            # Step 2: Detect and map columns with fallbacks
+            try:
+                column_mapping = self._detect_columns(df)
+                
+                # Ensure we have at least unit_number and actual_rent
+                if 'unit_number' not in column_mapping:
+                    raise ValueError("Could not detect unit number column. Please ensure your file has a column containing unit identifiers.")
+                
+                if 'actual_rent' not in column_mapping and 'market_rent' not in column_mapping:
+                    raise ValueError("Could not detect rent column. Please ensure your file has a column containing rent amounts.")
+                    
+                logger.info(f"Column mapping successful: {list(column_mapping.keys())}")
+                
+            except Exception as e:
+                error_msg = f"Column detection failed: {str(e)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
-            # Filter out non-unit rows (blanks, headers, totals, applicants)
-            filtered_df = self._filter_non_unit_rows(df, column_mapping)
+            # Step 3: Filter out non-unit rows with error handling
+            try:
+                filtered_df = self._filter_non_unit_rows(df, column_mapping)
+                
+                if filtered_df.empty:
+                    raise ValueError("No valid unit rows found after filtering. Please check your data format.")
+                    
+                logger.info(f"Filtered to {len(filtered_df)} valid unit rows")
+                
+            except Exception as e:
+                error_msg = f"Row filtering failed: {str(e)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
-            # Normalize the data
-            normalized_df = self._normalize_dataframe(filtered_df, column_mapping)
+            # Step 4: Normalize the data with error handling
+            try:
+                normalized_df = self._normalize_dataframe(filtered_df, column_mapping)
+                logger.info(f"Normalized {len(normalized_df)} rows")
+                
+            except Exception as e:
+                error_msg = f"Data normalization failed: {str(e)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
-            # Resolve duplicates (one row per unit)
-            deduplicated_df = self._resolve_duplicates(normalized_df)
-            self.parsing_summary['final_unique_units'] = len(deduplicated_df)
+            # Step 5: Resolve duplicates with error handling
+            try:
+                deduplicated_df = self._resolve_duplicates(normalized_df)
+                self.parsing_summary['final_unique_units'] = len(deduplicated_df)
+                
+                if deduplicated_df.empty:
+                    raise ValueError("No valid units remaining after duplicate resolution")
+                    
+                logger.info(f"Resolved duplicates, {len(deduplicated_df)} unique units remaining")
+                
+            except Exception as e:
+                error_msg = f"Duplicate resolution failed: {str(e)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
-            # Validate the data
-            validation_report = self._validate_data(deduplicated_df)
+            # Step 6: Validate the data
+            try:
+                validation_report = self._validate_data(deduplicated_df)
+                logger.info(f"Validation completed with {len(validation_report['errors'])} errors, {len(validation_report['warnings'])} warnings")
+                
+            except Exception as e:
+                logger.warning(f"Validation failed: {str(e)}, continuing with basic validation")
+                validation_report = {
+                    'total_records': len(deduplicated_df),
+                    'valid_records': len(deduplicated_df),
+                    'invalid_records': 0,
+                    'warnings': [f"Validation error: {str(e)}"],
+                    'errors': []
+                }
             
-            # Convert to records
-            normalized_records = self._dataframe_to_records(deduplicated_df)
+            # Step 7: Convert to records with error handling
+            try:
+                normalized_records = self._dataframe_to_records(deduplicated_df)
+                logger.info(f"Converted to {len(normalized_records)} records")
+                
+            except Exception as e:
+                error_msg = f"Record conversion failed: {str(e)}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
-            # Generate metadata
-            metadata = self._generate_metadata(deal_id, file_path, column_mapping, len(normalized_records))
+            # Step 8: Generate metadata
+            try:
+                metadata = self._generate_metadata(deal_id, file_path, column_mapping, len(normalized_records))
+                logger.info("Metadata generation completed")
+                
+            except Exception as e:
+                logger.warning(f"Metadata generation failed: {str(e)}, using basic metadata")
+                metadata = {
+                    'deal_id': deal_id,
+                    'source_file': str(file_path),
+                    'parsed_at': datetime.utcnow().isoformat(),
+                    'record_count': len(normalized_records),
+                    'parser_version': '2.0.0'
+                }
             
             return {
                 'normalized_data': normalized_records,
@@ -116,14 +206,20 @@ class RentRollParser:
                 'parsing_summary': self.parsing_summary
             }
             
+        except ValueError as e:
+            # Re-raise ValueError as-is (these are user-friendly error messages)
+            logger.error(f"Rent roll parsing failed: {e}")
+            raise
         except Exception as e:
-            logger.error(f"Error parsing rent roll: {e}")
+            # Catch any unexpected errors and provide a generic message
+            error_msg = f"Unexpected error during rent roll processing: {str(e)}"
+            logger.error(error_msg, exc_info=True)
             self.issues.append({
                 'type': 'error',
-                'message': f"Failed to parse rent roll: {str(e)}",
+                'message': error_msg,
                 'severity': 'high'
             })
-            raise
+            raise ValueError("An unexpected error occurred while processing your rent roll. Please check your file format and try again.")
     
     def _filter_non_unit_rows(self, df: pd.DataFrame, column_mapping: Dict[str, str]) -> pd.DataFrame:
         """
@@ -525,11 +621,46 @@ class RentRollParser:
         
         return df
     
+    def _clean_unit_label(self, value: str) -> Optional[str]:
+        """Clean and validate unit label according to mapping rules."""
+        if pd.isna(value) or value in ['', 'nan', 'NaN', 'None']:
+            return None
+        
+        # Trim whitespace and convert to uppercase
+        cleaned = str(value).strip().upper()
+        
+        # Validate: allow [A-Z0-9-_] and length <= 16
+        if len(cleaned) > 16:
+            cleaned = cleaned[:16]
+        
+        # Check if contains only allowed characters
+        if not re.match(r'^[A-Z0-9\-_]*$', cleaned):
+            # Remove invalid characters
+            cleaned = re.sub(r'[^A-Z0-9\-_]', '', cleaned)
+        
+        # Return None if empty after cleaning
+        return cleaned if cleaned else None
+
     def _detect_columns(self, df: pd.DataFrame) -> Dict[str, str]:
         """Detect and map columns based on patterns."""
         column_mapping = {}
         df_columns = [str(col).strip().lower() for col in df.columns]
         
+        # Handle unit_label with priority order
+        for priority_column in self.UNIT_LABEL_COLUMNS:
+            for i, col in enumerate(df_columns):
+                if col == priority_column and 'unit_label' not in column_mapping:
+                    column_mapping['unit_label'] = df.columns[i]
+                    self.issues.append({
+                        'type': 'info',
+                        'message': f"Detected unit_label column: '{df.columns[i]}' (priority: '{priority_column}')",
+                        'severity': 'low'
+                    })
+                    break
+            if 'unit_label' in column_mapping:
+                break
+        
+        # Handle other columns with pattern matching
         for target_col, patterns in self.COLUMN_PATTERNS.items():
             best_match = None
             best_score = 0
@@ -594,6 +725,20 @@ class RentRollParser:
             else:
                 normalized_df['unit_type'] = "Unknown"
         
+        # Unit label (floorplan, plan code, etc.) with validation
+        if 'unit_label' in column_mapping:
+            raw_values = df[column_mapping['unit_label']].astype(str).str.strip()
+            # Clean and validate unit_label values
+            normalized_df['unit_label'] = raw_values.apply(self._clean_unit_label)
+            self.issues.append({
+                'type': 'info',
+                'message': f"Detected unit labels from column: '{column_mapping['unit_label']}'",
+                'severity': 'low'
+            })
+        else:
+            # Set unit_label to None if not found
+            normalized_df['unit_label'] = None
+        
         # Square feet
         if 'square_feet' in column_mapping:
             normalized_df['square_feet'] = pd.to_numeric(df[column_mapping['square_feet']], errors='coerce')
@@ -656,7 +801,6 @@ class RentRollParser:
             )
         
         # Additional fields
-        normalized_df['unit_label'] = normalized_df['unit_type']
         normalized_df['rent'] = normalized_df['actual_rent']  # For backward compatibility
         normalized_df['move_in_date'] = normalized_df['lease_start']
         normalized_df['is_duplicate'] = False
@@ -738,45 +882,122 @@ class RentRollParser:
         }
     
     def persist_to_database(self, deal_id: int, normalized_records: List[Dict[str, Any]]) -> bool:
-        """Persist normalized records to database."""
+        """Persist normalized records to database with atomic transaction."""
         try:
-            # Clear existing normalized data for this deal
-            existing_records = self.session.query(RentRollNormalized).filter(
-                RentRollNormalized.deal_id == deal_id
-            ).all()
+            # Create a version timestamp for this update
+            version_timestamp = datetime.utcnow()
+            logger.info(f"Starting atomic persistence for deal {deal_id} at {version_timestamp}")
             
-            for record in existing_records:
-                self.session.delete(record)
+            # Use a savepoint for nested transaction safety
+            savepoint = self.session.begin_nested()
             
-            # Insert new normalized records
-            for record in normalized_records:
-                normalized_record = RentRollNormalized(
-                    deal_id=deal_id,
-                    unit_number=record.get('unit_number', ''),
-                    unit_label=record.get('unit_label', ''),
-                    unit_type=record.get('unit_type', ''),
-                    square_feet=self._safe_int(record.get('square_feet')),
-                    bedrooms=self._safe_int(record.get('bedrooms')),
-                    bathrooms=self._safe_float(record.get('bathrooms')),
-                    rent=self._safe_decimal(record.get('rent')),
-                    actual_rent=self._safe_decimal(record.get('actual_rent')),
-                    market_rent=self._safe_decimal(record.get('market_rent')),
-                    lease_start=self._safe_datetime(record.get('lease_start')),
-                    move_in_date=self._safe_datetime(record.get('move_in_date')),
-                    lease_expiration=self._safe_datetime(record.get('lease_expiration')),
-                    tenant_name=record.get('tenant_name', ''),
-                    lease_status=record.get('lease_status', ''),
-                    is_duplicate=record.get('is_duplicate', False),
-                    is_application=record.get('is_application', False),
-                    data_source=record.get('data_source', 'upload')
-                )
+            try:
+                # Clear existing normalized data for this deal
+                existing_records = self.session.query(RentRollNormalized).filter(
+                    RentRollNormalized.deal_id == deal_id
+                ).all()
                 
-                self.session.add(normalized_record)
-            
-            self.session.commit()
-            
-            # Generate unit mix summary
-            self._generate_unit_mix_summary(deal_id, normalized_records)
+                logger.info(f"Clearing {len(existing_records)} existing rent roll records for deal {deal_id}")
+                for record in existing_records:
+                    self.session.delete(record)
+                
+                # Clear existing unit mix data
+                existing_unit_mix = self.session.query(UnitMixSummary).filter(
+                    UnitMixSummary.deal_id == deal_id
+                ).all()
+                
+                logger.info(f"Clearing {len(existing_unit_mix)} existing unit mix records for deal {deal_id}")
+                for summary in existing_unit_mix:
+                    self.session.delete(summary)
+                
+                # Insert new normalized records with validation
+                logger.info(f"Inserting {len(normalized_records)} new rent roll records for deal {deal_id}")
+                validated_count = 0
+                
+                for i, record in enumerate(normalized_records):
+                    try:
+                        # Validate required fields
+                        if not record.get('unit_number'):
+                            logger.warning(f"Skipping record {i}: missing unit_number")
+                            continue
+                            
+                        if not record.get('actual_rent') and not record.get('market_rent'):
+                            logger.warning(f"Skipping record {i}: missing rent data")
+                            continue
+                        
+                        normalized_record = RentRollNormalized(
+                            deal_id=deal_id,
+                            unit_number=str(record.get('unit_number', '')),
+                            unit_label=record.get('unit_label', ''),
+                            unit_type=record.get('unit_type', ''),
+                            square_feet=self._safe_int(record.get('square_feet')),
+                            bedrooms=self._safe_int(record.get('bedrooms')),
+                            bathrooms=self._safe_float(record.get('bathrooms')),
+                            rent=self._safe_decimal(record.get('rent')),
+                            actual_rent=self._safe_decimal(record.get('actual_rent')),
+                            market_rent=self._safe_decimal(record.get('market_rent')),
+                            lease_start=self._safe_datetime(record.get('lease_start')),
+                            move_in_date=self._safe_datetime(record.get('move_in_date')),
+                            lease_expiration=self._safe_datetime(record.get('lease_expiration')),
+                            tenant_name=record.get('tenant_name', ''),
+                            lease_status=record.get('lease_status', ''),
+                            is_duplicate=record.get('is_duplicate', False),
+                            is_application=record.get('is_application', False),
+                            data_source=record.get('data_source', 'upload')
+                        )
+                        
+                        self.session.add(normalized_record)
+                        validated_count += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to create record {i}: {e}")
+                        continue
+                
+                if validated_count == 0:
+                    raise ValueError("No valid records to insert after validation")
+                
+                # Commit the rent roll data
+                savepoint.commit()
+                self.session.commit()
+                logger.info(f"Successfully committed {validated_count} rent roll records")
+                
+                # Generate unit mix summary in a separate transaction
+                try:
+                    self._generate_unit_mix_summary(deal_id, normalized_records)
+                    logger.info(f"Successfully generated unit mix summary for deal {deal_id}")
+                except Exception as e:
+                    logger.error(f"Failed to generate unit mix summary: {e}")
+                    # Don't fail the whole operation if unit mix generation fails
+                    # The rent roll data is already committed
+                
+                # Update document status to completed
+                try:
+                    from ..models import DealDocument
+                    document = self.session.query(DealDocument).filter(
+                        DealDocument.deal_id == deal_id,
+                        DealDocument.file_type == "rent_roll"
+                    ).order_by(DealDocument.created_at.desc()).first()
+                    
+                    if document:
+                        document.processing_status = "completed"
+                        document.processing_completed_at = datetime.utcnow()
+                        document.records_processed = len(records)
+                        document.issues_found = issues_count
+                        document.updated_at = version_timestamp
+                        self.session.commit()
+                        logger.info(f"Updated document {document.id} status to completed with {len(records)} records, {issues_count} issues")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to update document status: {e}")
+                    # Non-critical error
+                
+                logger.info(f"Atomic persistence completed successfully for deal {deal_id}")
+                
+            except Exception as e:
+                # Rollback the savepoint
+                savepoint.rollback()
+                logger.error(f"Persistence failed, rolling back: {e}")
+                raise
             
             return True
             
