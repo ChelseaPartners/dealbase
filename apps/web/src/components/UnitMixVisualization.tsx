@@ -311,12 +311,19 @@ export function UnitMixVisualization({
               <tr className="bg-gray-50 border-t-2 border-gray-200">
                 {groupBy === 'square_feet' && (
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {/* Empty cell for Unit Type column */}
+                    <div className="text-sm font-semibold text-gray-900">Total / Wtd. Avg.</div>
                   </td>
                 )}
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm font-semibold text-gray-900">Total / Wtd. Avg.</div>
-                </td>
+                {groupBy === 'square_feet' && (
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {/* Empty cell for Unit SF column */}
+                  </td>
+                )}
+                {groupBy !== 'square_feet' && (
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm font-semibold text-gray-900">Total / Wtd. Avg.</div>
+                  </td>
+                )}
                 
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                   {totals.total_units}
