@@ -14,13 +14,11 @@ interface UnitMixRow {
   avg_bedrooms?: number
   avg_bathrooms?: number
   avg_actual_rent: number
-  avg_market_rent: number
   rent_premium: number
   pro_forma_rent?: number
   rent_growth_rate?: number
   total_square_feet?: number
   total_actual_rent: number
-  total_market_rent: number
   total_pro_forma_rent: number
 }
 
@@ -31,7 +29,8 @@ interface UnitMixVisualizationProps {
     total_units: number
     total_occupied: number
     total_actual_rent: number
-    total_market_rent: number
+    total_square_feet?: number
+    avg_square_feet?: number
   }
   isLinked: boolean
   onEditRow?: (rowId: number) => void
@@ -195,10 +194,7 @@ export function UnitMixVisualization({
                 Avg In Place Rent
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Avg Market Rent
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Rent Premium
+                Avg Rent per SF
               </th>
               {!isLinked && (
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -214,7 +210,7 @@ export function UnitMixVisualization({
                   {groupBy === 'square_feet' && (
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">
-                        {mix.unit_label ? mix.unit_label.split(' - ')[0] : '—'}
+                        {mix.unit_type || '—'}
                       </div>
                     </td>
                   )}
@@ -257,22 +253,11 @@ export function UnitMixVisualization({
                   </td>
                   
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    ${mix.avg_market_rent ? Math.round(mix.avg_market_rent).toLocaleString() : 'N/A'}
+                    {mix.avg_actual_rent && mix.avg_square_feet 
+                      ? `$${(mix.avg_actual_rent / mix.avg_square_feet).toFixed(2)}`
+                      : 'N/A'}
                   </td>
                   
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {mix.rent_premium !== null && mix.rent_premium !== undefined ? (
-                      <span className={`font-medium ${
-                        mix.rent_premium > 0 ? 'text-red-600' :
-                        mix.rent_premium < 0 ? 'text-green-600' :
-                        'text-gray-500'
-                      }`}>
-                        {mix.rent_premium > 0 ? '+' : ''}${Math.round(mix.rent_premium).toLocaleString()}
-                      </span>
-                    ) : (
-                      <span className="text-gray-500">N/A</span>
-                    )}
-                  </td>
                   
                   {!isLinked && (
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -296,7 +281,7 @@ export function UnitMixVisualization({
               ))
             ) : (
               <tr>
-                <td colSpan={isLinked ? (groupBy === 'square_feet' || groupBy === 'unit_label' ? 7 : 6) : (groupBy === 'square_feet' || groupBy === 'unit_label' ? 8 : 7)} className="px-6 py-12 text-center">
+                <td colSpan={isLinked ? (groupBy === 'square_feet' || groupBy === 'unit_label' ? 6 : 5) : (groupBy === 'square_feet' || groupBy === 'unit_label' ? 7 : 6)} className="px-6 py-12 text-center">
                   <div className="text-gray-500">
                     <BarChart3 className="h-12 w-12 text-gray-300 mx-auto mb-3" />
                     <p className="text-sm">No unit mix data available</p>
@@ -336,8 +321,8 @@ export function UnitMixVisualization({
                 </td>
                 
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                  {unitMixData.length > 0 
-                    ? `${Math.round(unitMixData.reduce((sum, mix) => sum + (mix.avg_square_feet || 0), 0) / unitMixData.length).toLocaleString()} SF`
+                  {totals.avg_square_feet 
+                    ? `${totals.avg_square_feet.toLocaleString()} SF`
                     : 'N/A'}
                 </td>
                 
@@ -348,30 +333,11 @@ export function UnitMixVisualization({
                 </td>
                 
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                  ${totals.total_units > 0 && totals.total_market_rent
-                    ? Math.round(totals.total_market_rent / totals.total_units).toLocaleString()
-                    : '0'}
+                  {totals.total_units > 0 && totals.total_actual_rent && totals.avg_square_feet
+                    ? `$${(totals.total_actual_rent / totals.total_units / totals.avg_square_feet).toFixed(2)}`
+                    : 'N/A'}
                 </td>
                 
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                  {(() => {
-                    if (totals.total_units === 0 || !totals.total_actual_rent || !totals.total_market_rent) {
-                      return <span className="text-gray-500">N/A</span>
-                    }
-                    const avgActualRent = totals.total_actual_rent / totals.total_units
-                    const avgMarketRent = totals.total_market_rent / totals.total_units
-                    const rentPremium = avgActualRent - avgMarketRent
-                    return (
-                      <span className={`font-semibold ${
-                        rentPremium > 0 ? 'text-red-600' :
-                        rentPremium < 0 ? 'text-green-600' :
-                        'text-gray-500'
-                      }`}>
-                        {rentPremium > 0 ? '+' : ''}${Math.round(rentPremium).toLocaleString()}
-                      </span>
-                    )
-                  })()}
-                </td>
                 
                 {!isLinked && (
                   <td className="px-6 py-4 whitespace-nowrap">

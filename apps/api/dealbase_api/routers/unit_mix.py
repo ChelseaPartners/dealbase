@@ -6,9 +6,12 @@ from sqlmodel import Session, select
 from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel
+import logging
 
 from ..database import get_session
 from ..models import Deal, UnitMixSummary, RentRollNormalized
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -178,20 +181,18 @@ def get_unit_mix_by_floor_plan(deal_id: int, session: Session) -> UnitMixRespons
             }
         )
     
-    # Group units by (square footage, unit label)
-    units_by_floor_plan = {}
+    # Group units by square footage only (for SqFt view)
+    units_by_sqft = {}
     for unit in rent_roll_data:
         if unit.square_feet is not None:
-            # Use unit_label if available, otherwise use "—" for blank
-            unit_label = unit.unit_label.strip() if unit.unit_label and unit.unit_label.strip() else "—"
-            floor_plan_key = (unit.square_feet, unit_label)
+            sqft = unit.square_feet
             
-            if floor_plan_key not in units_by_floor_plan:
-                units_by_floor_plan[floor_plan_key] = []
-            units_by_floor_plan[floor_plan_key].append(unit)
+            if sqft not in units_by_sqft:
+                units_by_sqft[sqft] = []
+            units_by_sqft[sqft].append(unit)
     
-    # Sort by square footage ascending, then by unit label A→Z, blanks last
-    sorted_floor_plans = sorted(units_by_floor_plan.keys(), key=lambda x: (x[0], x[1] if x[1] != "—" else "zzz"))
+    # Sort by square footage ascending
+    sorted_sqft_values = sorted(units_by_sqft.keys())
     
     # Convert to response format
     unit_mix = []
@@ -199,9 +200,10 @@ def get_unit_mix_by_floor_plan(deal_id: int, session: Session) -> UnitMixRespons
     total_occupied = 0
     total_actual_rent = Decimal("0")
     total_market_rent = Decimal("0")
+    total_square_feet = 0
     
-    for sf, unit_label in sorted_floor_plans:
-        units = units_by_floor_plan[(sf, unit_label)]
+    for sqft in sorted_sqft_values:
+        units = units_by_sqft[sqft]
         
         # Calculate aggregated metrics
         group_total_units = len(units)
@@ -239,8 +241,8 @@ def get_unit_mix_by_floor_plan(deal_id: int, session: Session) -> UnitMixRespons
         
         unit_mix.append({
             "id": len(unit_mix) + 1,  # Generate ID for frontend
-            "unit_type": f"{sf} SF",  # Use square footage as the "unit type"
-            "unit_label": f"{unit_type} - {sf} SF",  # Show the unit type with square footage
+            "unit_type": unit_type,  # Use the actual unit type (1BR, 2BR)
+            "unit_label": None,  # No unit_label column in SqFt view
             "total_units": group_total_units,
             "occupied_units": group_occupied_units,
             "vacant_units": group_vacant_units,
@@ -283,6 +285,10 @@ def get_unit_mix_by_floor_plan(deal_id: int, session: Session) -> UnitMixRespons
         last_derived_at = first_row.last_derived_at.isoformat() if first_row.last_derived_at else None
         last_manual_edit_at = first_row.last_manual_edit_at.isoformat() if first_row.last_manual_edit_at else None
     
+    # Calculate total square footage from unit_mix data
+    total_square_feet = sum([row["total_square_feet"] for row in unit_mix if row["total_square_feet"] is not None])
+    avg_square_feet = int(total_square_feet / total_units) if total_units > 0 else None
+    
     return UnitMixResponse(
         deal_id=deal_id,
         provenance=provenance,
@@ -295,7 +301,9 @@ def get_unit_mix_by_floor_plan(deal_id: int, session: Session) -> UnitMixRespons
             "total_units": total_units,
             "total_occupied": total_occupied,
             "total_actual_rent": float(total_actual_rent),
-            "total_market_rent": float(total_market_rent)
+            "total_market_rent": float(total_market_rent),
+            "total_square_feet": total_square_feet,
+            "avg_square_feet": avg_square_feet
         }
     )
 
@@ -424,6 +432,10 @@ def get_unit_mix_by_unit_label(deal_id: int, session: Session) -> UnitMixRespons
         last_derived_at = first_row.last_derived_at.isoformat() if first_row.last_derived_at else None
         last_manual_edit_at = first_row.last_manual_edit_at.isoformat() if first_row.last_manual_edit_at else None
     
+    # Calculate total square footage from unit_mix data
+    total_square_feet = sum([row["total_square_feet"] for row in unit_mix if row["total_square_feet"] is not None])
+    avg_square_feet = int(total_square_feet / total_units) if total_units > 0 else None
+    
     return UnitMixResponse(
         deal_id=deal_id,
         provenance=provenance,
@@ -436,7 +448,9 @@ def get_unit_mix_by_unit_label(deal_id: int, session: Session) -> UnitMixRespons
             "total_units": total_units,
             "total_occupied": total_occupied,
             "total_actual_rent": float(total_actual_rent),
-            "total_market_rent": float(total_market_rent)
+            "total_market_rent": float(total_market_rent),
+            "total_square_feet": total_square_feet,
+            "avg_square_feet": avg_square_feet
         }
     )
 
@@ -447,11 +461,14 @@ async def get_unit_mix(
     group_by: str = "square_feet",
     session: Session = Depends(get_session)
 ) -> UnitMixResponse:
-    """Get unit mix summary for a deal."""
+    """Get unit mix summary for a deal with automatic refresh."""
     # Verify deal exists
     deal = session.get(Deal, deal_id)
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
+    
+    # Always get the latest data by querying the source tables directly
+    # This ensures we never serve stale cached data
     
     # Get unit mix data
     if group_by == "square_feet":
@@ -461,11 +478,27 @@ async def get_unit_mix(
         # For unit label grouping, we need to derive from rent roll data directly
         return get_unit_mix_by_unit_label(deal_id, session)
     else:
-        # Default unit type grouping
+        # Default unit type grouping - check if we have fresh unit mix data
+        # If not, derive from rent roll data
         unit_mix_data = session.exec(
             select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
             .order_by(UnitMixSummary.unit_type)
         ).all()
+        
+        # If no unit mix data exists or it's stale, derive from rent roll
+        if not unit_mix_data:
+            # Try to derive from rent roll data
+            try:
+                derive_unit_mix_from_nrr(deal_id, session)
+                # Re-query after derivation
+                unit_mix_data = session.exec(
+                    select(UnitMixSummary).where(UnitMixSummary.deal_id == deal_id)
+                    .order_by(UnitMixSummary.unit_type)
+                ).all()
+            except Exception as e:
+                # If derivation fails, return empty response
+                logger.warning(f"Failed to derive unit mix for deal {deal_id}: {e}")
+                unit_mix_data = []
     
     # Get provenance info from first row (all rows should have same provenance for a deal)
     provenance = "MANUAL"
@@ -493,7 +526,7 @@ async def get_unit_mix(
         unit_mix.append({
             "id": row.id,
             "unit_type": row.unit_type,
-            "unit_label": row.unit_label,
+            "unit_label": None,  # No unit_label column in Type view
             "total_units": row.total_units,
             "occupied_units": row.occupied_units,
             "vacant_units": row.vacant_units,
@@ -516,6 +549,10 @@ async def get_unit_mix(
         total_actual_rent += row.total_actual_rent
         total_market_rent += row.total_market_rent
     
+    # Calculate total square footage from unit_mix data
+    total_square_feet = sum([row["total_square_feet"] for row in unit_mix if row["total_square_feet"] is not None])
+    avg_square_feet = int(total_square_feet / total_units) if total_units > 0 else None
+    
     return UnitMixResponse(
         deal_id=deal_id,
         provenance=provenance,
@@ -528,7 +565,9 @@ async def get_unit_mix(
             "total_units": total_units,
             "total_occupied": total_occupied,
             "total_actual_rent": float(total_actual_rent),
-            "total_market_rent": float(total_market_rent)
+            "total_market_rent": float(total_market_rent),
+            "total_square_feet": total_square_feet,
+            "avg_square_feet": avg_square_feet
         }
     )
 

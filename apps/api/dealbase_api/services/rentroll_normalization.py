@@ -50,10 +50,15 @@ class RentRollNormalizer:
             
             # Convert numpy types to Python native types for JSON serialization
             def convert_types(obj):
+                """Convert numpy types to Python native types for JSON serialization."""
                 if hasattr(obj, 'item'):  # numpy scalar
                     return obj.item()
                 elif hasattr(obj, 'tolist'):  # numpy array
                     return obj.tolist()
+                elif isinstance(obj, pd.Timestamp):
+                    return obj.to_pydatetime()
+                elif pd.isna(obj):
+                    return None
                 return obj
             
             # Convert the dataframes
@@ -74,7 +79,7 @@ class RentRollNormalizer:
             return {
                 "normalized_data": normalized_records,
                 "column_mapping": column_mapping,
-                "validation_report": validation_report,
+                "validation_report": convert_types(validation_report),
                 "preview_rows": preview_records
             }
         except Exception as e:

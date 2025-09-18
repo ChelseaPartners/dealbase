@@ -198,12 +198,13 @@ class RentRollParser:
                     'parser_version': '2.0.0'
                 }
             
+            # Convert all numpy types to Python native types for JSON serialization
             return {
-                'normalized_data': normalized_records,
-                'issues_report': self.issues,
-                'validation_report': validation_report,
-                'metadata': metadata,
-                'parsing_summary': self.parsing_summary
+                'normalized_data': self._convert_numpy_types(normalized_records),
+                'issues_report': self._convert_numpy_types(self.issues),
+                'validation_report': self._convert_numpy_types(validation_report),
+                'metadata': self._convert_numpy_types(metadata),
+                'parsing_summary': self._convert_numpy_types(self.parsing_summary)
             }
             
         except ValueError as e:
@@ -867,6 +868,21 @@ class RentRollParser:
             records.append(record)
         
         return records
+    
+    def _convert_numpy_types(self, obj):
+        """Recursively convert numpy types to Python native types for JSON serialization."""
+        if isinstance(obj, dict):
+            return {key: self._convert_numpy_types(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_numpy_types(item) for item in obj]
+        elif isinstance(obj, (np.integer, np.floating)):
+            return obj.item()
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, pd.Timestamp):
+            return obj.to_pydatetime()
+        else:
+            return obj
     
     def _generate_metadata(self, deal_id: int, file_path: str, column_mapping: Dict[str, str], record_count: int) -> Dict[str, Any]:
         """Generate metadata for provenance tracking."""

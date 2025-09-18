@@ -71,19 +71,46 @@ export function UploadRentRollModal({ isOpen, onClose, dealId, onUploadComplete,
       formData.append('file', file)
       formData.append('file_type', 'rent_roll')
 
+      // Create an AbortController for timeout
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 120000) // 2 minute timeout
+
       const response = await fetch(`/api/intake/rentroll/${dealId}`, {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       })
 
+      clearTimeout(timeoutId)
+
       if (!response.ok) {
-        throw new Error('Upload failed')
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.detail || `Upload failed with status ${response.status}`)
       }
 
       const result = await response.json()
-      setUploadedDoc(result)
+      
+      if (result.success) {
+        setUploadedDoc(result)
+        setError(null)
+        
+        // Show retry info if there were retries
+        if (result.retry_info && (result.retry_info.processing_retries > 0 || result.retry_info.persistence_retries > 0)) {
+          console.log('Upload completed with retries:', result.retry_info)
+        }
+      } else {
+        throw new Error(result.message || 'Upload failed')
+      }
     } catch (err) {
-      setError('Failed to upload file. Please try again.')
+      if (err.name === 'AbortError') {
+        setError('Upload timed out. Please try again with a smaller file or check your connection.')
+      } else if (err.message.includes('Failed to detect')) {
+        setError('Could not process this file. Please ensure it contains rent roll data with unit numbers and rent amounts.')
+      } else if (err.message.includes('No valid unit rows found')) {
+        setError('No valid rent roll data found in this file. Please check the format and try again.')
+      } else {
+        setError(`Upload failed: ${err.message || 'Please try again.'}`)
+      }
       console.error('Upload error:', err)
     } finally {
       setUploading(false)
@@ -206,9 +233,9 @@ export function UploadRentRollModal({ isOpen, onClose, dealId, onUploadComplete,
             /* Upload Success */
             <div className="text-center py-8">
               <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-              <h4 className="text-lg font-semibold text-gray-900 mb-2">Upload Successful!</h4>
+              <h4 className="text-lg font-semibold text-gray-900 mb-2">Upload & Processing Complete!</h4>
               <p className="text-gray-600 mb-4">
-                <strong>{uploadedDoc.original_filename}</strong> has been uploaded and saved to Documents.
+                <strong>{uploadedDoc.filename}</strong> has been uploaded, processed, and linked to Unit Mix.
               </p>
               <div className="bg-gray-50 rounded-lg p-4 mb-6">
                 <div className="flex items-center justify-between text-sm">
@@ -216,14 +243,25 @@ export function UploadRentRollModal({ isOpen, onClose, dealId, onUploadComplete,
                   <span className="font-medium">{formatFileSize(uploadedDoc.file_size)}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm mt-2">
-                  <span className="text-gray-600">Status:</span>
-                  <span className="font-medium text-green-600">Saved to Documents</span>
+                  <span className="text-gray-600">Records processed:</span>
+                  <span className="font-medium">{uploadedDoc.records_processed || 0}</span>
                 </div>
+                <div className="flex items-center justify-between text-sm mt-2">
+                  <span className="text-gray-600">Status:</span>
+                  <span className="font-medium text-green-600">Processed & Linked</span>
+                </div>
+                {uploadedDoc.issues_found > 0 && (
+                  <div className="flex items-center justify-between text-sm mt-2">
+                    <span className="text-gray-600">Issues found:</span>
+                    <span className="font-medium text-yellow-600">{uploadedDoc.issues_found}</span>
+                  </div>
+                )}
               </div>
-              <div className="bg-blue-50 rounded-lg p-4 mb-6">
-                <h5 className="text-sm font-medium text-blue-900 mb-2">What would you like to do next?</h5>
-                <p className="text-sm text-blue-700">
-                  You can save this file to Documents only, or also link it to Unit Mix to derive unit mix data.
+              <div className="bg-green-50 rounded-lg p-4 mb-6">
+                <h5 className="text-sm font-medium text-green-900 mb-2">Ready to Use!</h5>
+                <p className="text-sm text-green-700">
+                  Your rent roll data has been automatically processed and is now available in Unit Mix. 
+                  You can view the data and make adjustments as needed.
                 </p>
               </div>
             </div>
@@ -233,32 +271,29 @@ export function UploadRentRollModal({ isOpen, onClose, dealId, onUploadComplete,
         {/* Footer */}
         <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
           <div className="text-sm text-gray-500">
-            {uploadedDoc ? 'Choose your next action' : 'Upload a file to continue'}
+            {uploadedDoc ? 'Processing complete - ready to view Unit Mix' : 'Upload a file to continue'}
           </div>
           <div className="flex items-center space-x-3">
             <button
               onClick={handleClose}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
-              {uploadedDoc ? 'Cancel' : 'Close'}
+              {uploadedDoc ? 'Close' : 'Close'}
             </button>
             {uploadedDoc && (
-              <>
-                <button
-                  onClick={handleSaveOnly}
-                  className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <FileText className="h-4 w-4 mr-2" />
-                  Save Only
-                </button>
-                <button
-                  onClick={handleSaveAndLink}
-                  className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
-                >
-                  <FileText className="h-4 w-4 mr-2" />
-                  Save and Link
-                </button>
-              </>
+              <button
+                onClick={() => {
+                  handleClose()
+                  // Trigger refresh of parent component to show new data
+                  if (onUploadComplete) {
+                    onUploadComplete(uploadedDoc.document_id)
+                  }
+                }}
+                className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                View Unit Mix
+              </button>
             )}
           </div>
         </div>

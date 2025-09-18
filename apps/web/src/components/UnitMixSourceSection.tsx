@@ -46,10 +46,13 @@ export function UnitMixSourceSection({
   onCloseRentRollModal
 }: UnitMixSourceSectionProps) {
   const getSourcePill = () => {
-    if (isLinked && rentRollName && lastLinkedAt) {
+    if (isLinked && lastLinkedAt) {
       return (
         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-          Derived from "{rentRollName}" • Last linked {new Date(lastLinkedAt).toLocaleDateString()}
+          {rentRollName 
+            ? `Derived from "${rentRollName}" • Last linked ${new Date(lastLinkedAt).toLocaleDateString()}`
+            : `Derived from rent roll • Last linked ${new Date(lastLinkedAt).toLocaleDateString()}`
+          }
         </span>
       )
     } else if (provenance === 'MANUAL') {
@@ -111,14 +114,17 @@ export function UnitMixSourceSection({
         <div className="border-t border-gray-200 pt-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              {isLinked && rentRollName ? (
+              {isLinked ? (
                 <>
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                     <CheckCircle className="h-3 w-3 mr-1" />
                     Rent Roll linked
                   </span>
                   <span className="text-sm text-gray-600">
-                    Derived from "{rentRollName}" • Last linked {lastLinkedAt ? new Date(lastLinkedAt).toLocaleDateString() : 'Unknown'}
+                    {rentRollName 
+                      ? `Derived from "${rentRollName}" • Last linked ${lastLinkedAt ? new Date(lastLinkedAt).toLocaleDateString() : 'Unknown'}`
+                      : `Derived from rent roll • Last linked ${lastLinkedAt ? new Date(lastLinkedAt).toLocaleDateString() : 'Unknown'}`
+                    }
                   </span>
                 </>
               ) : (

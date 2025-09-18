@@ -407,7 +407,7 @@ async def upload_rentroll(
     file: UploadFile = File(...),
     session: Session = Depends(get_session)
 ) -> dict:
-    """Upload rent roll file - Step 1: Simple file storage only."""
+    """Upload and automatically process rent roll file."""
     print(f"DEBUG: Starting upload - deal_id: {deal_id}, filename: {file.filename}, content_type: {file.content_type}")
     
     # Verify deal exists
@@ -415,27 +415,156 @@ async def upload_rentroll(
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
     
-    # Read file content first
+    # Validate file
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    
+    # Validate file type
+    allowed_extensions = ['.csv', '.xlsx', '.xls']
+    file_ext = Path(file.filename).suffix.lower()
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid file type. Supported formats: {', '.join(allowed_extensions)}"
+        )
+    
+    # Validate file size (50MB limit)
+    max_size = 50 * 1024 * 1024  # 50MB
     content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"File too large. Maximum size: {max_size // (1024*1024)}MB"
+        )
+    
     print(f"DEBUG: File content size: {len(content)} bytes")
-    print(f"DEBUG: First 200 chars of content: {content[:200]}")
     
-    # Save the raw document with the content
-    document = save_document_with_content(deal_id, file, content, "rent_roll", session)
-    print(f"DEBUG: Saved document: {document.original_filename} -> {document.filename}")
+    # Check for duplicate uploads (idempotency)
+    file_hash = hashlib.md5(content).hexdigest()
+    existing_doc = session.exec(
+        select(DealDocument).where(
+            DealDocument.deal_id == deal_id,
+            DealDocument.file_hash == file_hash,
+            DealDocument.file_type == "rent_roll"
+        )
+    ).first()
     
-    # For now, just mark as uploaded successfully without any processing
-    document.processing_status = "uploaded"
-    session.commit()
+    if existing_doc and existing_doc.processing_status == "completed":
+        return {
+            "success": True,
+            "message": "File already processed successfully (duplicate upload detected)",
+            "document_id": existing_doc.id,
+            "filename": existing_doc.original_filename,
+            "file_size": existing_doc.file_size,
+            "records_processed": "already_processed",
+            "issues_found": 0,
+            "validation_passed": True,
+            "processing_summary": {"duplicate_upload": True}
+        }
     
-    return {
-        "success": True,
-        "message": "Rent roll file uploaded successfully",
-        "document_id": document.id,
-        "filename": document.original_filename,
-        "file_size": document.file_size,
-        "next_step": "File is ready for processing. Use the preview endpoint to see raw data."
-    }
+    try:
+        # Save the raw document with the content
+        document = save_document_with_content(deal_id, file, content, "rent_roll", session)
+        print(f"DEBUG: Saved document: {document.original_filename} -> {document.filename}")
+        
+        # Automatically start processing
+        document.processing_status = "processing"
+        document.processing_started_at = datetime.utcnow()
+        session.commit()
+        
+        # Process the file using the new parser with retry logic
+        from ..services.rentroll_parser import get_rentroll_parser
+        
+        max_retries = 3
+        retry_count = 0
+        result = None
+        
+        while retry_count < max_retries:
+            try:
+                parser = get_rentroll_parser(session)
+                result = parser.parse_rentroll(deal_id, document.file_path)
+                break  # Success, exit retry loop
+                
+            except Exception as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    raise e
+                print(f"DEBUG: Processing attempt {retry_count} failed, retrying: {e}")
+                # Wait before retry (exponential backoff)
+                import time
+                time.sleep(2 ** retry_count)
+        
+        # Check for parsing errors
+        if result and "error" in result:
+            document.processing_status = "failed"
+            document.processing_error = result["error"]
+            session.commit()
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Failed to parse rent roll: {result['error']}"
+            )
+        
+        # Persist to database with retry logic
+        max_persistence_retries = 2
+        persistence_retry_count = 0
+        
+        while persistence_retry_count < max_persistence_retries:
+            try:
+                parser.persist_to_database(deal_id, result['normalized_data'])
+                break  # Success, exit retry loop
+                
+            except Exception as e:
+                persistence_retry_count += 1
+                if persistence_retry_count >= max_persistence_retries:
+                    # Mark as failed if persistence fails after retries
+                    document.processing_status = "failed"
+                    document.processing_error = f"Failed to persist data after {max_persistence_retries} attempts: {str(e)}"
+                    session.commit()
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to save rent roll data: {str(e)}"
+                    )
+                print(f"DEBUG: Persistence attempt {persistence_retry_count} failed, retrying: {e}")
+                # Wait before retry
+                import time
+                time.sleep(1)
+        
+        # Mark as completed
+        document.processing_status = "completed"
+        document.updated_at = datetime.utcnow()
+        session.commit()
+        
+        return {
+            "success": True,
+            "message": "Rent roll uploaded and processed successfully",
+            "document_id": document.id,
+            "filename": document.original_filename,
+            "file_size": document.file_size,
+            "records_processed": len(result['normalized_data']),
+            "issues_found": len(result['issues_report']),
+            "validation_passed": len(result['validation_report']['errors']) == 0,
+            "processing_summary": result['parsing_summary'],
+            "retry_info": {
+                "processing_retries": retry_count,
+                "persistence_retries": persistence_retry_count
+            }
+        }
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        # Mark as failed for any other errors
+        if 'document' in locals():
+            document.processing_status = "failed"
+            document.processing_error = str(e)
+            session.commit()
+        
+        print(f"ERROR: Failed to process rent roll: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to process rent roll: {str(e)}"
+        )
 
 
 @router.get("/intake/rentroll/{deal_id}/preview")

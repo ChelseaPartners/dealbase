@@ -230,7 +230,7 @@ class DealDocument(SQLModel, table=True):
     __tablename__ = "deal_documents"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    deal_id: int = Field(foreign_key="deals.id")
+    deal_id: int = Field(foreign_key="deals.id", index=True)  # Add index for faster queries
     
     # Document metadata
     filename: str = Field(index=True)
@@ -241,11 +241,15 @@ class DealDocument(SQLModel, table=True):
     
     # File storage
     file_path: str  # Path to stored file
-    file_hash: Optional[str] = None  # For deduplication
+    file_hash: Optional[str] = Field(default=None, index=True)  # Add index for deduplication lookups
     
     # Processing status
-    processing_status: str = Field(default="pending")  # pending, processing, completed, failed
+    processing_status: str = Field(default="pending", index=True)  # Add index for status queries
     processing_error: Optional[str] = None
+    processing_started_at: Optional[datetime] = None  # When processing actually began
+    processing_completed_at: Optional[datetime] = None  # When processing finished
+    records_processed: Optional[int] = None  # Number of units processed
+    issues_found: Optional[int] = None  # Number of data quality issues
     
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

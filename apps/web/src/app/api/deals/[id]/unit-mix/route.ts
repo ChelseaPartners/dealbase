@@ -9,7 +9,10 @@ export async function GET(
   const dealId = params.id
   
   try {
-    const url = `http://localhost:8000/api/deals/${dealId}/unit-mix`
+    // Forward query parameters to backend
+    const searchParams = request.nextUrl.searchParams
+    const queryString = searchParams.toString()
+    const url = `http://localhost:8000/api/deals/${dealId}/unit-mix${queryString ? `?${queryString}` : ''}`
     
     const response = await fetch(url, {
       method: 'GET',

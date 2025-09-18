@@ -58,9 +58,9 @@ interface RentRoll {
 }
 
 async function fetchUnitMixData(dealId: string, groupBy: 'unit_type' | 'square_feet' | 'unit_label' = 'square_feet'): Promise<UnitMixResponse> {
-  // Bypass Next.js API route and call backend directly
+  // Use Next.js API route which forwards query parameters to backend
   const timestamp = new Date().getTime()
-  const response = await fetch(`http://localhost:8000/api/deals/${dealId}/unit-mix?group_by=${groupBy}&t=${timestamp}`)
+  const response = await fetch(`/api/deals/${dealId}/unit-mix?group_by=${groupBy}&t=${timestamp}`)
   if (!response.ok) {
     throw new Error('Failed to fetch unit mix data')
   }
@@ -134,7 +134,7 @@ export default function UnitMixPage() {
       }
       return response.json()
     },
-    enabled: !!dealId && unitMixData?.is_linked_to_nrr
+    enabled: !!dealId
   })
 
   // Fetch available rent rolls for re-linking
@@ -310,6 +310,7 @@ export default function UnitMixPage() {
   const isLinked = unitMixData?.is_linked_to_nrr || false
   const hasData = unitMixData?.unit_mix && unitMixData.unit_mix.length > 0
   const provenance = unitMixData?.provenance || 'MANUAL'
+  
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -358,7 +359,7 @@ export default function UnitMixPage() {
           isLinked={isLinked}
           rentRollName={unitMixData?.rent_roll_name}
           lastLinkedAt={unitMixData?.last_derived_at}
-          hasRentRollData={!!unitMixData?.rent_roll_name} // Check if rent roll is linked
+          hasRentRollData={isLinked} // Check if rent roll is linked
           rentRollCreatedDate={unitMixData?.last_derived_at}
           rentRollError={undefined}
           onUploadRentRoll={handleUploadRentRoll}
