@@ -152,7 +152,7 @@ export function UnitMixVisualization({
           </div>
           <div className="text-center">
             <div className="text-2xl font-bold text-gray-900">
-              {totals.total_units > 0
+              {totals.total_units > 0 && totals.total_actual_rent
                 ? `$${Math.round(totals.total_actual_rent / totals.total_units).toLocaleString()}`
                 : '$0'}
             </div>
@@ -160,7 +160,7 @@ export function UnitMixVisualization({
           </div>
           <div className="text-center">
             <div className="text-2xl font-bold text-gray-900">
-              {totals.total_units > 0 
+              {totals.total_units > 0 && totals.total_occupied !== undefined
                 ? ((totals.total_occupied / totals.total_units) * 100).toFixed(0)
                 : 0}%
             </div>
@@ -237,13 +237,14 @@ export function UnitMixVisualization({
                   
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     <span className={`font-medium ${
+                      mix.total_units === 0 ? 'text-gray-500' :
                       (mix.occupied_units / mix.total_units) >= 0.95 ? 'text-green-600' :
                       (mix.occupied_units / mix.total_units) >= 0.90 ? 'text-green-500' :
                       (mix.occupied_units / mix.total_units) >= 0.80 ? 'text-yellow-600' :
                       (mix.occupied_units / mix.total_units) >= 0.70 ? 'text-orange-600' :
                       'text-red-600'
                     }`}>
-                      {((mix.occupied_units / mix.total_units) * 100).toFixed(1)}%
+                      {mix.total_units === 0 ? 'N/A' : `${((mix.occupied_units / mix.total_units) * 100).toFixed(1)}%`}
                     </span>
                   </td>
                   
@@ -252,21 +253,25 @@ export function UnitMixVisualization({
                   </td>
                   
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    ${Math.round(mix.avg_actual_rent).toLocaleString()}
+                    ${mix.avg_actual_rent ? Math.round(mix.avg_actual_rent).toLocaleString() : 'N/A'}
                   </td>
                   
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    ${Math.round(mix.avg_market_rent).toLocaleString()}
+                    ${mix.avg_market_rent ? Math.round(mix.avg_market_rent).toLocaleString() : 'N/A'}
                   </td>
                   
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    <span className={`font-medium ${
-                      mix.rent_premium > 0 ? 'text-red-600' :
-                      mix.rent_premium < 0 ? 'text-green-600' :
-                      'text-gray-500'
-                    }`}>
-                      {mix.rent_premium > 0 ? '+' : ''}${Math.round(mix.rent_premium).toLocaleString()}
-                    </span>
+                    {mix.rent_premium !== null && mix.rent_premium !== undefined ? (
+                      <span className={`font-medium ${
+                        mix.rent_premium > 0 ? 'text-red-600' :
+                        mix.rent_premium < 0 ? 'text-green-600' :
+                        'text-gray-500'
+                      }`}>
+                        {mix.rent_premium > 0 ? '+' : ''}${Math.round(mix.rent_premium).toLocaleString()}
+                      </span>
+                    ) : (
+                      <span className="text-gray-500">N/A</span>
+                    )}
                   </td>
                   
                   {!isLinked && (
@@ -318,7 +323,7 @@ export function UnitMixVisualization({
                 </td>
                 
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                  {totals.total_units > 0 
+                  {totals.total_units > 0 && totals.total_occupied !== undefined
                     ? `${((totals.total_occupied / totals.total_units) * 100).toFixed(1)}%`
                     : '0%'}
                 </td>
@@ -330,21 +335,24 @@ export function UnitMixVisualization({
                 </td>
                 
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                  ${totals.total_units > 0 
+                  ${totals.total_units > 0 && totals.total_actual_rent
                     ? Math.round(totals.total_actual_rent / totals.total_units).toLocaleString()
                     : '0'}
                 </td>
                 
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                  ${totals.total_units > 0 
+                  ${totals.total_units > 0 && totals.total_market_rent
                     ? Math.round(totals.total_market_rent / totals.total_units).toLocaleString()
                     : '0'}
                 </td>
                 
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                   {(() => {
-                    const avgActualRent = totals.total_units > 0 ? totals.total_actual_rent / totals.total_units : 0
-                    const avgMarketRent = totals.total_units > 0 ? totals.total_market_rent / totals.total_units : 0
+                    if (totals.total_units === 0 || !totals.total_actual_rent || !totals.total_market_rent) {
+                      return <span className="text-gray-500">N/A</span>
+                    }
+                    const avgActualRent = totals.total_actual_rent / totals.total_units
+                    const avgMarketRent = totals.total_market_rent / totals.total_units
                     const rentPremium = avgActualRent - avgMarketRent
                     return (
                       <span className={`font-semibold ${
