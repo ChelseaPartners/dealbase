@@ -153,7 +153,7 @@ export function RentRollTable({ units, onEditUnit, showDetails = false }: RentRo
       const normalizedLabel = trimmedValue ? trimmedValue.toUpperCase() : null
       
       // Update the unit in the local state (optimistic update)
-      unit.unit_label = normalizedLabel
+      unit.unit_label = normalizedLabel || undefined
       
       // TODO: Call API to update the unit label
       // This would be implemented when we have the API endpoint

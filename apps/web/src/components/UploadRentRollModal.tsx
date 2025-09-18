@@ -102,14 +102,15 @@ export function UploadRentRollModal({ isOpen, onClose, dealId, onUploadComplete,
         throw new Error(result.message || 'Upload failed')
       }
     } catch (err) {
-      if (err.name === 'AbortError') {
+      const error = err as Error
+      if (error.name === 'AbortError') {
         setError('Upload timed out. Please try again with a smaller file or check your connection.')
-      } else if (err.message.includes('Failed to detect')) {
+      } else if (error.message.includes('Failed to detect')) {
         setError('Could not process this file. Please ensure it contains rent roll data with unit numbers and rent amounts.')
-      } else if (err.message.includes('No valid unit rows found')) {
+      } else if (error.message.includes('No valid unit rows found')) {
         setError('No valid rent roll data found in this file. Please check the format and try again.')
       } else {
-        setError(`Upload failed: ${err.message || 'Please try again.'}`)
+        setError(`Upload failed: ${error.message || 'Please try again.'}`)
       }
       console.error('Upload error:', err)
     } finally {
