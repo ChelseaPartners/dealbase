@@ -180,7 +180,7 @@ export function UnitMixVisualization({
                 </th>
               )}
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                {groupBy === 'unit_type' ? 'Type' : groupBy === 'square_feet' ? 'Unit SF' : 'Label'}
+                {groupBy === 'unit_type' ? 'Unit Type' : groupBy === 'square_feet' ? 'Unit SF' : 'Unit Label'}
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 # of Units
@@ -309,9 +309,9 @@ export function UnitMixVisualization({
             {/* Total/Weighted Average Row */}
             {unitMixData.length > 0 && (
               <tr className="bg-gray-50 border-t-2 border-gray-200">
-                {(groupBy === 'square_feet' || groupBy === 'unit_label') && (
+                {groupBy === 'square_feet' && (
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {/* Empty cell for Unit Label column */}
+                    {/* Empty cell for Unit Type column */}
                   </td>
                 )}
                 <td className="px-6 py-4 whitespace-nowrap">
