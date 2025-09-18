@@ -137,10 +137,18 @@ export function UnitMixVisualization({
 
       {/* Charts/Metrics Section */}
       <div className="px-6 py-4 border-b border-gray-200">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="text-center">
             <div className="text-2xl font-bold text-gray-900">{totals.total_units}</div>
             <div className="text-xs text-gray-500">Total Units</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-gray-900">
+              {unitMixData.length > 0 
+                ? `${Math.round(unitMixData.reduce((sum, mix) => sum + (mix.total_square_feet || 0), 0)).toLocaleString()}`
+                : '0'}
+            </div>
+            <div className="text-xs text-gray-500">Total SF</div>
           </div>
           <div className="text-center">
             <div className="text-2xl font-bold text-gray-900">
@@ -189,6 +197,9 @@ export function UnitMixVisualization({
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Avg Market Rent
               </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Rent Premium
+              </th>
               {!isLinked && (
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
@@ -227,7 +238,9 @@ export function UnitMixVisualization({
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     <span className={`font-medium ${
                       (mix.occupied_units / mix.total_units) >= 0.95 ? 'text-green-600' :
-                      (mix.occupied_units / mix.total_units) >= 0.90 ? 'text-yellow-600' :
+                      (mix.occupied_units / mix.total_units) >= 0.90 ? 'text-green-500' :
+                      (mix.occupied_units / mix.total_units) >= 0.80 ? 'text-yellow-600' :
+                      (mix.occupied_units / mix.total_units) >= 0.70 ? 'text-orange-600' :
                       'text-red-600'
                     }`}>
                       {((mix.occupied_units / mix.total_units) * 100).toFixed(1)}%
@@ -244,6 +257,16 @@ export function UnitMixVisualization({
                   
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     ${Math.round(mix.avg_market_rent).toLocaleString()}
+                  </td>
+                  
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <span className={`font-medium ${
+                      mix.rent_premium > 0 ? 'text-red-600' :
+                      mix.rent_premium < 0 ? 'text-green-600' :
+                      'text-gray-500'
+                    }`}>
+                      {mix.rent_premium > 0 ? '+' : ''}${Math.round(mix.rent_premium).toLocaleString()}
+                    </span>
                   </td>
                   
                   {!isLinked && (
@@ -316,6 +339,23 @@ export function UnitMixVisualization({
                   ${totals.total_units > 0 
                     ? Math.round(totals.total_market_rent / totals.total_units).toLocaleString()
                     : '0'}
+                </td>
+                
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
+                  {(() => {
+                    const avgActualRent = totals.total_units > 0 ? totals.total_actual_rent / totals.total_units : 0
+                    const avgMarketRent = totals.total_units > 0 ? totals.total_market_rent / totals.total_units : 0
+                    const rentPremium = avgActualRent - avgMarketRent
+                    return (
+                      <span className={`font-semibold ${
+                        rentPremium > 0 ? 'text-red-600' :
+                        rentPremium < 0 ? 'text-green-600' :
+                        'text-gray-500'
+                      }`}>
+                        {rentPremium > 0 ? '+' : ''}${Math.round(rentPremium).toLocaleString()}
+                      </span>
+                    )
+                  })()}
                 </td>
                 
                 {!isLinked && (
