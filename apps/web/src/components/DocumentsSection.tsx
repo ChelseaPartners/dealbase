@@ -22,6 +22,7 @@ interface DocumentsSectionProps {
 export function DocumentsSection({ dealId, onUploadClick }: DocumentsSectionProps) {
   const [documents, setDocuments] = useState<Document[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchDocuments()
@@ -38,12 +39,22 @@ export function DocumentsSection({ dealId, onUploadClick }: DocumentsSectionProp
       const response = await fetch(`/api/deals/${dealId}/documents`)
       if (response.ok) {
         const data = await response.json()
-        setDocuments(data)
+        // Ensure data is an array
+        if (Array.isArray(data)) {
+          setDocuments(data)
+        } else {
+          console.error('Documents API returned non-array data:', data)
+          setDocuments([])
+        }
       } else {
         console.error('Failed to fetch documents, status:', response.status)
+        setDocuments([])
+        setError('Failed to load documents. Please try again.')
       }
     } catch (error) {
       console.error('Failed to fetch documents:', error)
+      setDocuments([])
+      setError('Failed to load documents. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -187,7 +198,18 @@ export function DocumentsSection({ dealId, onUploadClick }: DocumentsSectionProp
         </div>
       </div>
       
-      {documents.length === 0 ? (
+      {error ? (
+        <div className="text-center py-8">
+          <AlertCircle className="h-12 w-12 text-red-300 mx-auto mb-4" />
+          <p className="text-red-500">{error}</p>
+          <button
+            onClick={fetchDocuments}
+            className="mt-2 text-sm text-primary-600 hover:text-primary-700"
+          >
+            Try again
+          </button>
+        </div>
+      ) : documents.length === 0 ? (
         <div className="text-center py-8">
           <FileText className="h-12 w-12 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-500">No documents uploaded yet</p>
@@ -197,7 +219,7 @@ export function DocumentsSection({ dealId, onUploadClick }: DocumentsSectionProp
         </div>
       ) : (
         <div className="space-y-3">
-          {documents.map((doc) => (
+          {Array.isArray(documents) && documents.map((doc) => (
             <div
               key={doc.id}
               className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50"
