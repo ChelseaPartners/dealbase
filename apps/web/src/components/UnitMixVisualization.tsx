@@ -214,14 +214,14 @@ export function UnitMixVisualization({
                   {groupBy === 'square_feet' && (
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">
-                        {mix.unit_type || '—'}
+                        {mix.unit_label ? mix.unit_label.split(' - ')[0] : '—'}
                       </div>
                     </td>
                   )}
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">
                       {groupBy === 'unit_type' ? mix.unit_type : 
-                       groupBy === 'square_feet' ? mix.unit_type : 
+                       groupBy === 'square_feet' ? `${mix.avg_square_feet} SF` : 
                        mix.unit_label || '—'}
                     </div>
                     {groupBy === 'unit_type' && mix.unit_label && (
